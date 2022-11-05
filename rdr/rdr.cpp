@@ -3,6 +3,7 @@
 #include <cstdlib>
 
 #include <vector>
+#include <string>
 #include <iostream>
 #include <iomanip>
 #include <stdexcept>
@@ -94,53 +95,63 @@ std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(uint8_t * pse) {
     int len = pse[1];
     int i = 2;
     while(i < len + 2) {
-        if(pse[i] != 0xA5) { // Proprietary information encoded in BER-TLV
-            i += 2 + pse[i + 1];
-        } else {
+        if(pse[i] == 0xA5) { // Proprietary information encoded in BER-TLV
             int pi_end = i + 2 + pse[i + 1];
             i += 2;
 
             while(i < pi_end) {
-                if(pse[i] != 0xBF || pse[i + 1] != 0x0C) { // FCI issuer discetionary data
-                    i += 2 + pse[i + 1];
-                } else {
+                if(pse[i] == 0xBF && pse[i + 1] == 0x0C) { // FCI issuer discretionary data
                     int fci_end = i + 3 + pse[i + 2];
                     i += 3;
 
                     while(i < fci_end) {
-                        if(pse[i] != 0x61) { // Application template
-                            i += 2 + pse[i + 1];
-                        } else {
+                        if(pse[i] == 0x61) { // Application template
                             int app_end = i + 2 + pse[i + 1];
+                            std::cout << "Found Application template at " << i << " until " << app_end << std::endl;
                             i += 2;
 
                             while(i < app_end) {
-                                if(pse[i] != 0x4F) { // Application ID
-                                    i += 2 + pse[i + 1];
-                                } else {
-                                	int appid_len = pse[i + 1];
-                                	int appid = i + 2;
+                                if(pse[i] == 0x4F) { // Application ID
+                                    int appid_len = pse[i + 1];
+                                    int appid = i + 2;
                                     int appid_end = appid + appid_len;
-
-
 
                                     std::vector<uint8_t> AID(pse + appid, pse + appid_end);
 
-                                    std::cout << "Found AID of len " << appid_len << " ";
-
+                                    std::cout << "Found AID of len " << appid_len << " at " << i << ": ";
                                     show(AID);
-
-                                    std::cout << std::endl; 
+                                    std::cout << std::endl;
 
                                     result.push_back(AID);
 
                                     i = appid_end;
+                                } else if(pse[i] == 0x50) { // Application Label
+                                    int label_len = pse[i + 1];
+                                    int label = i + 2;
+                                    int label_end = label + label_len;
+
+                                    std::string app_label( (char*)(pse + label) , label_len);
+                                    std::cout << "Found an Application label " << app_label << std::endl;
+
+                                    i = label_end;
+                                } else if(pse[i] == 0x9F && pse[i + 1] == 0x0A) { // Application Selection Registered Proprietary Data
+                                    i += 3 + pse[i + 2]; // ignored
+                                } else {
+                                    i += 2 + pse[i + 1];
                                 }
                             }
+                            i = app_end;
+                        } else {
+                            i += 2 + pse[i + 1];
                         }
                     }
+                    i = fci_end;
+                } else {
+                    i += 2 + pse[i + 1];
                 }
-            }  
+            }
+        } else {
+            i += 2 + pse[i + 1];              
         }
     }
 }
@@ -152,7 +163,6 @@ std::vector<std::vector<uint8_t>> try_known_AIDs(nfc_device* pnd) {
 
 void decode_TLV(std::vector<uint8_t> data) {
     std::cout << "https://emvlab.org/tlvutils/?data="; show(data); std::cout << std::endl;
-
 
     /* Look for cardholder name */
     uint8_t * res = data.data();
@@ -252,7 +262,7 @@ void decode_TLV(std::vector<uint8_t> data) {
 
 void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
     auto resp = read_record(pnd, p1, p2);
-    if ( resp[1]==0x6a && (resp[2]==0x82 || resp[2]==0x83)) {
+    if ( resp[1]==0x6a && (resp[2]==0x81 || resp[2]==0x82 || resp[2]==0x83)) {
         // File or application not found
         return;
     }
@@ -311,6 +321,7 @@ int main(int argc, char **argv) {
         if(resp.empty())
             resp = select_AID(pnd, PSE);
         if(!resp.empty()) {
+            std::cout << "Got PSE/PPSE: \n"; show(resp); std::cout << std::endl;
             AIDs = get_AIDs_from_PSE(resp.data() + 1);
         } else {
             AIDs = try_known_AIDs(pnd);
