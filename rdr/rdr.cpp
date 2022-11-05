@@ -20,18 +20,15 @@ extern "C" {
 	int pn53x_transceive(struct nfc_device *pnd, const uint8_t *pbtTx, const size_t szTx, uint8_t *pbtRx, const size_t szRxLen, int timeout);
 }
 
-void show(size_t recvlg, uint8_t *recv) {
-    int i;
-
-    for (i=0;i<(int) recvlg;i++) {
-        printf("%02x",(unsigned int) recv[i]);
+std::string bytes_to_string(std::vector<uint8_t> data, std::string prefix="", std::string separator="") {
+    std::stringstream ss;
+    ss << std::hex;
+    for(auto b = data.begin(); b < data.end(); b++) {
+        ss << prefix << std::setw(2) << std::setfill('0') << (unsigned int) *b;
+        if(b + 1 != data.end())
+            ss << separator;
     }
-}
-
-void show(std::vector<uint8_t> data) {
-    for(auto b: data) {
-        printf("%02x",(unsigned int) b);
-    }
+    return ss.str();
 }
 
 std::vector<uint8_t> pn53x_transceive(struct nfc_device *pnd, std::vector<uint8_t> tx, int timeout=5000) {
@@ -56,7 +53,7 @@ std::vector<uint8_t> try_starting(struct nfc_device *pnd) {
         resp = pn53x_transceive(pnd, START_14443A);
     } catch(std::runtime_error ex) {}
     if (resp.size() > 0) {
-        printf("[+] 14443A card found!!\n");
+        std::cout << "[+] 14443A card found!!" << std::endl;
     } else{
         // 14443B Card
         try {
@@ -64,9 +61,9 @@ std::vector<uint8_t> try_starting(struct nfc_device *pnd) {
             resp = pn53x_transceive(pnd, START_14443B);
         } catch(std::runtime_error ex) {}
         if (resp.size() > 0) {
-            printf("[+] 14443B card found!!\n");
+            std::cout << "[+] 14443B card found!!" << std::endl;
         } else {
-            printf("[x] Card not found or not supported!! Supported types: 14443A, 14443B.\n");
+            std::cout << "[x] Card not found or not supported!! Supported types: 14443A, 14443B." << std::endl;
         }
     }
 
@@ -118,9 +115,8 @@ std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(uint8_t * pse) {
 
                                     std::vector<uint8_t> AID(pse + appid, pse + appid_end);
 
-                                    std::cout << "Found AID of len " << appid_len << " at " << i << ": ";
-                                    show(AID);
-                                    std::cout << std::endl;
+                                    std::cout << "Found AID of len " << appid_len << " at " << i << ": " 
+                                        << bytes_to_string(AID) << std::endl;
 
                                     result.push_back(AID);
 
@@ -154,6 +150,8 @@ std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(uint8_t * pse) {
             i += 2 + pse[i + 1];              
         }
     }
+
+    return result;
 }
 
 std::vector<std::vector<uint8_t>> try_known_AIDs(nfc_device* pnd) {
@@ -162,8 +160,8 @@ std::vector<std::vector<uint8_t>> try_known_AIDs(nfc_device* pnd) {
 }
 
 void decode_TLV(std::vector<uint8_t> data) {
-    std::cout << "https://emvlab.org/tlvutils/?data="; show(data); std::cout << std::endl;
-
+    std::cout << "https://emvlab.org/tlvutils/?data=" << bytes_to_string(data) << std::endl;
+#if 0
     /* Look for cardholder name */
     uint8_t * res = data.data();
     unsigned char output[50], c, amount[10],msg[100];
@@ -184,19 +182,19 @@ void decode_TLV(std::vector<uint8_t> data) {
         if ((*res==0x4d&&*(res+1)==0x57)||(*res==0x9f&&*(res+1)==0x6b)) {
             strncpy(output, res+3, 13);
             output[11]=0;
-            printf("PAN:");
+            std::cout << "PAN:";
             
             for (j=0;j<8;j++) {
-                if (j%2==0) printf(" ");
+                if (j%2==0) std::cout << " ";
                 c = output[j];
                 if (MASKED&j>=1&j<=5) {
-                    printf("**");
+                    std::cout << "**";
                 }
                 else {
                     printf("%02x",c&0xff);
                 }
             }
-            printf("\n");
+            std::cout << std::endl;
             expiry = (output[10]+(output[9]<<8)+(output[8]<<16))>>4;
             printf("Expiration date: %02x/20%02x\n\n",(expiry&0xff),((expiry>>8)&0xff));
             break;            
@@ -239,7 +237,6 @@ void decode_TLV(std::vector<uint8_t> data) {
     // Looking for transaction logs
     szRx = data.size();
     if (szRx==18) { // Non-empty transaction
-        //show(szRx, abtRx);
         res = data.data();
 
         /* Look for date */
@@ -258,6 +255,7 @@ void decode_TLV(std::vector<uint8_t> data) {
         sprintf(msg,"%s\t%d,%02x€",msg,atoi(amount),res[6]);
         printf("%s\n",msg);
     }
+#endif
 }
 
 void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
@@ -271,15 +269,16 @@ void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
         return;
     }
     else{
-        printf("\n-------------------------------------\n");
-        printf("> READ RECORD %02x-%02x suceeded\n",p1,p2);
-        //show(resp); printf("\n");
-        decode_TLV(std::vector<uint8_t>( resp.begin() + 1, resp.end() ) );
+        std::cout << std::endl << "-------------------------------------" << std::endl
+            << "> READ RECORD " << std::hex 
+            << std::setw(2) << std::setfill('0') << (unsigned int) p1 << "-" 
+            << std::setw(2) << std::setfill('0') << (unsigned int) p2 << " suceeded" << std::endl;
+        decode_TLV(std::vector<uint8_t>( resp.begin() + 1, resp.end() - 2 ) );
     }
 }
 
 static void close(nfc_device*pnd, nfc_context* context) {
-    printf("[-] Closing device\n");
+    std::cout << "[-] Closing device" << std::endl;
     if(pnd)
         nfc_close(pnd);
     if(context)
@@ -292,25 +291,25 @@ int main(int argc, char **argv) {
     nfc_modulation nm;
     nfc_target ant[1];
     
-    printf("[-] Connecting to the reader...\n");
+    std::cout << "[-] Connecting to the reader..." << std::endl;
     nfc_init(&context);
     pnd = nfc_open(context,NULL);
     if (pnd == NULL) {
-        printf("[x] Unable to connect to NFC device.\n");
+        std::cout << "[x] Unable to connect to NFC device." << std::endl;
         close(pnd, context);
         return(1);
     }
 
-    printf("[+] Connected to NFC reader\n");
+    std::cout << "[+] Connected to NFC reader" << std::endl;
     nfc_initiator_init(pnd);
 
     // Checking card type...
-    printf("[-] Looking for known card types...\n");
+    std::cout << "[-] Looking for known card types..." << std::endl;
     
     auto resp = try_starting(pnd);
     if(!resp.empty()) {
 
-        printf("[-] Finding out AIDS\n");
+        std::cout << "[-] Finding out AIDS" << std::endl;
 
         std::vector<std::vector<uint8_t>> AIDs;
 
@@ -321,7 +320,7 @@ int main(int argc, char **argv) {
         if(resp.empty())
             resp = select_AID(pnd, PSE);
         if(!resp.empty()) {
-            std::cout << "Got PSE/PPSE: \n"; show(resp); std::cout << std::endl;
+            std::cout << "Got PSE/PPSE: \n" << bytes_to_string(resp) << std::endl;
             AIDs = get_AIDs_from_PSE(resp.data() + 1);
         } else {
             AIDs = try_known_AIDs(pnd);
