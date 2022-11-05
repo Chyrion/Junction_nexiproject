@@ -3,7 +3,7 @@ import re
 
 forbidden = ["[0m] ", '', '[0m\\n']
 
-p = subprocess.run(["./py/tlvp", "./py/data.bin"], capture_output=True)
+p = subprocess.run(["./py/tlvp", "./py/data.txt"], capture_output=True)
 a = str(p)[78:]
 b = a.split('\\x1b')
 c = []
