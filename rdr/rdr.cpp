@@ -52,7 +52,6 @@ std::vector<uint8_t> pn53x_transceive(struct nfc_device *pnd, std::vector<uint8_
 std::vector<uint8_t> try_starting(struct nfc_device *pnd) {
     static std::vector<uint8_t> START_14443A = {0x4A, 0x01, 0x00}; //InListPassiveTarget
     static std::vector<uint8_t> START_14443B = {0x4A, 0x01, 0x03, 0x00}; //InListPassiveTarget
-
     std::vector<uint8_t> resp;
     try {
         // 14443A Card
@@ -60,10 +59,10 @@ std::vector<uint8_t> try_starting(struct nfc_device *pnd) {
     } catch(std::runtime_error ex) {}
     if (resp.size() > 0) {
         std::cout << "[+] 14443A card found!!" << std::endl;
-    } else{
+    } else {
         // 14443B Card
         try {
-            // 14443A Card
+            // 14443B Card
             resp = pn53x_transceive(pnd, START_14443B);
         } catch(std::runtime_error ex) {}
         if (resp.size() > 0) {
@@ -77,14 +76,17 @@ std::vector<uint8_t> try_starting(struct nfc_device *pnd) {
 }
 
 std::vector<uint8_t> select_AID(struct nfc_device *pnd, std::vector<uint8_t> AID, uint8_t p1=0x04, uint8_t p2=0x00) {
-    std::vector<uint8_t> select_cmd = {0x40, 0x01, 0x00, 0xA4, p1, p2};
-    select_cmd.push_back((uint8_t)AID.size());
+    std::vector<uint8_t> select_cmd = {0x40, 0x01, 0x00, 0xA4, p1, p2, (uint8_t)AID.size()};
     select_cmd.insert( select_cmd.end(), AID.begin(), AID.end() );
     select_cmd.push_back(0x00);
-
-    std::cout << bytes_to_string(select_cmd) << std::endl;
-
     return pn53x_transceive(pnd, select_cmd);
+}
+
+std::vector<uint8_t> get_processing_options(nfc_device* pnd, std::vector<uint8_t> capabilities={0x83, 0x00}) {
+    std::vector<uint8_t> GPO_cmd = {0x40, 0x01, 0x80, 0xA8, 0x00, 0x00, (uint8_t)capabilities.size() };
+    GPO_cmd.insert( GPO_cmd.end(), capabilities.begin(), capabilities.end() );
+    GPO_cmd.push_back(0x00);    
+    return pn53x_transceive(pnd, GPO_cmd);
 }
 
 std::vector<uint8_t> read_record(struct nfc_device *pnd, uint8_t p1, uint8_t p2) {
@@ -97,6 +99,8 @@ void dump_TLV(std::vector<uint8_t> data) {
 }
 
 void decode_TLV(std::vector<uint8_t> data) {
+    if(data.empty())
+        return;
     std::cout << "https://emvlab.org/tlvutils/?data=" << bytes_to_string(data, "", "") << std::endl;
 #if 0
     /* Look for cardholder name */
@@ -304,21 +308,80 @@ std::map<std::string, std::vector<uint8_t>> get_AIDs(nfc_device* pnd) {
     return AIDs;
 }
 
+std::vector<std::pair<uint16_t, uint8_t>> get_PDOL_from_SELECT_response(std::vector<uint8_t> resp) {
+    int i = 0;
+    while(i < resp.size()) {
+        if(resp[i] == 0xA5) { // Proprietary information encoded in BER-TLV
+            int pi_end = i + 2 + resp[i + 1];
+            i += 2;
+
+            while(i < pi_end) {
+                if(resp[i] == 0x9F && resp[i + 1] == 0x38) { // Processing Options Data Object List (PDOL)
+                    int pdol = i + 3;
+                    int pdol_len = resp[i + 2];
+                    int pdol_end = pdol + resp[i + 2];
+                    
+                    std::vector<uint8_t> PDOL_raw(resp.begin() + pdol, resp.begin() + pdol_end);
+
+                    std::vector<std::pair<uint16_t, uint8_t>> PDOL;
+
+                    for(int j = 0; j < PDOL_raw.size(); j += 3) {
+                        uint16_t tag = (PDOL_raw[j] << 8) | PDOL_raw[j + 1];
+                        uint8_t length = PDOL_raw[j + 2];
+                        PDOL.push_back(std::make_pair(tag, length));
+                    }
+                    
+                    return PDOL;
+
+                } else {
+                    i += 2 + resp[i + 1];
+                }
+            }
+        } else {
+            i += 2 + resp[i + 1];              
+        }
+    }
+
+    return std::vector<std::pair<uint16_t, uint8_t>>();
+}
+
+std::vector<uint8_t> get_capabilities_from_PDOL(std::vector<std::pair<uint16_t, uint8_t>> PDOL) {
+    std::vector<uint8_t> capabilities({0x83, 0x00});
+
+    for(auto tl: PDOL) {
+        uint16_t tag = tl.first;
+        uint8_t length = tl.second;
+
+        switch(tag) {
+            default:
+                for(int i = 0; i < length; i++)
+                    capabilities.push_back(0x00);
+                break;
+        }
+
+        capabilities[1] += length;
+    }
+
+    return capabilities;
+}
+
 void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
     auto resp = read_record(pnd, p1, p2);
     if ( resp[0]==0x6a && (resp[1]==0x81 || resp[1]==0x82 || resp[1]==0x83)) {
         // File or application not found
         return;
-    }
-    else if ( resp[0]==0x6a && resp[1]==0x86) {
+    } else if ( resp[0]==0x6a && resp[1]==0x86) {
         // Wrong parameters
         return;
-    }
+    }/* else if ( resp[0]==0x40 || resp[0]==0x00) {
+        // Something weird
+        return;
+    }*/
     else{
         std::cout << std::endl << "> READ RECORD " << std::hex
             << std::setw(2) << std::setfill('0') << (unsigned int) p1 << "-" 
             << std::setw(2) << std::setfill('0') << (unsigned int) p2 << " suceeded" << std::endl;
-
+        std::cout << (unsigned int) resp[0] << " " << (unsigned int) resp[1] << std::endl;
         std::vector<uint8_t> tlv(resp.begin(), resp.end() - 2);
         dump_TLV(tlv);
         decode_TLV(tlv);
@@ -355,7 +418,7 @@ int main(int argc, char **argv) {
         nfc_initiator_init(pnd);
 
         // Checking card type...
-        std::cout << "[-] Looking for known card types..." << std::endl;
+        std::cout << "[-] Trying to start..." << std::endl;
         
         auto resp = try_starting(pnd);
         if(!resp.empty()) {
@@ -368,8 +431,17 @@ int main(int argc, char **argv) {
             for(auto AID: AIDs) {
                 std::cout << "[-] Selecting app \"" << AID.first << "\"..." << std::endl;
                 resp = select_AID(pnd, AID.second);
+                decode_TLV(resp);
                 if(resp[0] != 0x6F)
                     continue;
+
+                resp = std::vector<uint8_t>(resp.begin() + 2, resp.end() - 2);
+                auto PDOL = get_PDOL_from_SELECT_response(resp);
+
+                std::cout << "[-] Getting Processing Options..." << std::endl;
+                auto capabilities = get_capabilities_from_PDOL(PDOL);
+                resp = get_processing_options(pnd, capabilities);
+                decode_TLV(resp);
 
                 // Looking for data in the records
                 for (int ef = 1; ef <= 31; ef++) {
