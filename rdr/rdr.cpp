@@ -45,6 +45,33 @@ std::vector<uint8_t> pn53x_transceive(struct nfc_device *pnd, std::vector<uint8_
     return rx;
 }
 
+std::vector<uint8_t> try_starting(struct nfc_device *pnd) {
+    static std::vector<uint8_t> START_14443A = {0x4A, 0x01, 0x00}; //InListPassiveTarget
+    static std::vector<uint8_t> START_14443B = {0x4A, 0x01, 0x03, 0x00}; //InListPassiveTarget
+
+    std::vector<uint8_t> resp;
+    try {
+        // 14443A Card
+        resp = pn53x_transceive(pnd, START_14443A);
+    } catch(std::runtime_error ex) {}
+    if (resp.size() > 0) {
+        printf("[+] 14443A card found!!\n");
+    } else{
+        // 14443B Card
+        try {
+            // 14443A Card
+            resp = pn53x_transceive(pnd, START_14443B);
+        } catch(std::runtime_error ex) {}
+        if (resp.size() > 0) {
+            printf("[+] 14443B card found!!\n");
+        } else {
+            printf("[x] Card not found or not supported!! Supported types: 14443A, 14443B.\n");
+        }
+    }
+
+    return resp;
+}
+
 std::vector<uint8_t> select_AID(struct nfc_device *pnd, std::vector<uint8_t> AID) {
     std::vector<uint8_t> select_cmd = {0x40, 0x01, 0x00, 0xA4, 0x04, 0x00};
     select_cmd.push_back((uint8_t)AID.size());
@@ -56,13 +83,6 @@ std::vector<uint8_t> select_AID(struct nfc_device *pnd, std::vector<uint8_t> AID
 std::vector<uint8_t> read_record(struct nfc_device *pnd, uint8_t p1, uint8_t p2) {
     std::vector<uint8_t> read_cmd = {0x40, 0x01, 0x00, 0xB2, p1, p2, 0x00};
     return pn53x_transceive(pnd, read_cmd);
-}
-
-uint8_t READ_RECORD[] = {0x40, 0x01, 0x00, 0xB2, 0x01, 0x0C, 0x00}; //InDataExchange 
-
-std::vector<std::vector<uint8_t>> try_default_AIDs(nfc_device* pnd) {
-    std::vector<std::vector<uint8_t>> result;
-    return result;
 }
 
 std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(uint8_t * pse) {
@@ -123,6 +143,11 @@ std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(uint8_t * pse) {
             }  
         }
     }
+}
+
+std::vector<std::vector<uint8_t>> try_known_AIDs(nfc_device* pnd) {
+    std::vector<std::vector<uint8_t>> result;
+    return result;
 }
 
 void decode_TLV(std::vector<uint8_t> data) {
@@ -256,11 +281,8 @@ int main(int argc, char **argv) {
     nfc_device* pnd;
     nfc_modulation nm;
     nfc_target ant[1];
-
-    std::vector<uint8_t> START_14443A = {0x4A, 0x01, 0x00}; //InListPassiveTarget
-    std::vector<uint8_t> START_14443B = {0x4A, 0x01, 0x03, 0x00}; //InListPassiveTarget
     
-    printf("[-] Connecting...\n");
+    printf("[-] Connecting to the reader...\n");
     nfc_init(&context);
     pnd = nfc_open(context,NULL);
     if (pnd == NULL) {
@@ -275,49 +297,33 @@ int main(int argc, char **argv) {
     // Checking card type...
     printf("[-] Looking for known card types...\n");
     
-    std::vector<uint8_t> resp;
-    try {
-        // 14443A Card
-        resp = pn53x_transceive(pnd, START_14443A);
-    } catch(std::runtime_error ex) {}
-    if (resp.size() > 0) {
-        printf("[+] 14443A card found!!\n");
-    } else{
-        // 14443B Card
-        try {
-            // 14443A Card
-            resp = pn53x_transceive(pnd, START_14443B);
-        } catch(std::runtime_error ex) {}
-        if (resp.size() > 0) {
-            printf("[+] 14443B card found!!\n");
-        } else {
-            printf("[x] Card not found or not supported!! Supported types: 14443A, 14443B.\n");
-            close(pnd, context);
-            return(1);
-        }
-    }
-
-    printf("[-] Finding out AIDS\n");
-
-    std::vector<std::vector<uint8_t>> AIDs;
-
-    std::vector<uint8_t> PSE = {0x31, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31};
-    std::vector<uint8_t> PPSE = {0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31};
-
-    resp = select_AID(pnd, PPSE);
-    if(resp.empty())
-        resp = select_AID(pnd, PSE);
+    auto resp = try_starting(pnd);
     if(!resp.empty()) {
-        AIDs = get_AIDs_from_PSE(resp.data() + 1);
-    }
 
-    std::cout << "Found " << AIDs.size() << " AIDs" << std::endl;
-    for(auto AID: AIDs) {
-        select_AID(pnd, AID);
-        // Looking for data in the records
-        for (int p1 = 0; p1 <= 10; p1 += 1) {
-            for (int p2 = 12; p2 <= 28; p2 += 8) {
-                try_reading_sector(pnd, p1, p2);
+        printf("[-] Finding out AIDS\n");
+
+        std::vector<std::vector<uint8_t>> AIDs;
+
+        std::vector<uint8_t> PSE = {0x31, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31};
+        std::vector<uint8_t> PPSE = {0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31};
+
+        resp = select_AID(pnd, PPSE);
+        if(resp.empty())
+            resp = select_AID(pnd, PSE);
+        if(!resp.empty()) {
+            AIDs = get_AIDs_from_PSE(resp.data() + 1);
+        } else {
+            AIDs = try_known_AIDs(pnd);
+        }
+
+        std::cout << "Found " << AIDs.size() << " AIDs" << std::endl;
+        for(auto AID: AIDs) {
+            select_AID(pnd, AID);
+            // Looking for data in the records
+            for (int p1 = 0; p1 <= 10; p1 += 1) {
+                for (int p2 = 12; p2 <= 28; p2 += 8) {
+                    try_reading_sector(pnd, p1, p2);
+                }
             }
         }
     }
