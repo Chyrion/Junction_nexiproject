@@ -85,7 +85,14 @@ def reader1(file):
         if len(tracks)==0:
             tracks.append("No Track Data Found")
 
-        return card_numbers,card_holders,AIDS,keys,application_labels,priorities, tracks
+        expiration_index = finder(data, "Application Expiration Date")
+        expirations = []
+        for expiration in expiration_index:
+            expirations.append(data[expiration + 1])
+        if len(expirations) == 0:
+            expirations.append("No Expiration Date Found")
+
+        return card_numbers,card_holders,AIDS,keys,application_labels,priorities, tracks, expirations
 
 
 
@@ -125,7 +132,7 @@ def main():
     #print(final_list)
     #gui = GUI(final_list[0],final_list[1],final_list[2],"track1","track2",final_list[3])
     print(final_list)
-    gui=GUI(final_list[0],final_list[1],final_list[2],final_list[3], final_list[4], final_list[5], final_list[6])
+    gui=GUI(final_list[0],final_list[1],final_list[2],final_list[3], final_list[4], final_list[5], final_list[6], final_list[7])
 
 
     sys.exit(app.exec_())

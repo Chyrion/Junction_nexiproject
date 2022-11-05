@@ -9,7 +9,7 @@ import PyQt5
 
 class GUI(QtWidgets.QMainWindow):
 
-    def __init__(self,card_numbers,card_holder,AID,Key,application_label, priorities, tracks):
+    def __init__(self,card_numbers,card_holder,AID,Key,application_label, priorities, tracks,expirations):
         self.card_numbers=card_numbers
         self.AID = AID
         self.Key = Key
@@ -17,6 +17,7 @@ class GUI(QtWidgets.QMainWindow):
         self.tracks = tracks
         self.application_label = application_label
         self.priorities = priorities
+        self.expirations = expirations
         super().__init__()
         self.setCentralWidget(QtWidgets.QWidget())  # QMainWindown must have a centralWidget to be able to add layouts
         self.layout = QtWidgets.QVBoxLayout()  # Vertical main layout(s)
@@ -28,6 +29,7 @@ class GUI(QtWidgets.QMainWindow):
         self.init_window()
         self.add_text()
         self.file_name=None
+        self.button()
 
 
 
@@ -61,6 +63,10 @@ class GUI(QtWidgets.QMainWindow):
         y_list=[-400,-300,-200,-100,0,100,200,300,400,500,600,700]
         # for y in range(-400,300,100):
         #     self.scene_top.addLine(0,y,800,y)
+
+        self.dump_label = QLabel(str(self.file))
+        self.dump_label.setFont(QFont('Arial', 20))
+        self.dump_label.move(50, 50)
 
 
         self.setWindowTitle('Gimme ya wallet')
@@ -103,10 +109,10 @@ class GUI(QtWidgets.QMainWindow):
         self.track2.setStyleSheet("border :3px solid blue;")
 
 
-        self.TLV_data_d = QLabel("Decoded TLV_data placeholder:" + str(self.application_label))
-        self.TLV_data_d.setFont(QFont("Arial", font))
-        self.TLV_data_d.move(x, y_list[6])
-        self.TLV_data_d.setStyleSheet("border :3px solid blue;")
+        self.expiration_label = QLabel("Application Expiration Date:" + str(self.expirations))
+        self.expiration_label.setFont(QFont("Arial", font))
+        self.expiration_label.move(x, y_list[5])
+        self.expiration_label.setStyleSheet("border :3px solid blue;")
 
         self.application_label2 = QLabel("Application Label:" + str(self.application_label))
         self.application_label2.setFont(QFont("Arial", font))
@@ -121,6 +127,15 @@ class GUI(QtWidgets.QMainWindow):
         self.scene_top.addWidget(self.TLV_data_d)
         self.scene_top.addWidget(self.Cardnumber_label)
         self.scene_top.addWidget(self.application_label2)
+        self.scene_top.addWidget(self.dump_label)
+
+    def button(self):
+        # executor=Executor()
+
+        self.button = QPushButton('HACK', self)
+        self.button.move(50, 50)
+        # self.button.clicked.connect(lambda executor.execute() )
+        self.layout.addWidget(self.button)
 
 
 
