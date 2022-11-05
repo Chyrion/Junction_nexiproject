@@ -7,6 +7,7 @@
 #include <map>
 #include <iterator>
 #include <algorithm>
+#include <random>
 #include <iostream>
 #include <fstream>
 #include <iomanip>
@@ -35,6 +36,57 @@ std::string bytes_to_string(std::vector<uint8_t> data, std::string prefix="", st
             ss << separator;
     }
     return ss.str();
+}
+
+std::pair<std::pair<std::vector<uint8_t>, uint32_t>, std::vector<uint8_t>> decode_TLV(std::vector<uint8_t> raw) {
+    std::vector<uint8_t> tag;
+    uint32_t length;
+    std::vector<uint8_t> value;
+
+    tag.push_back(raw[0]);
+    if((tag[0] & 0x1F) == 0x1F) { //at least two bytes
+        do {
+            tag.push_back(raw[tag.size()]);
+        } while((tag.back() & 0x80) == 0x80); // continues while the upper bit is 1
+    }
+
+    length = raw[tag.size()];
+    if((length & 0x80) == 0x80) { // multi byte length
+        int len_len = length & (~0x80);
+        length = 0;
+        for(int i = 0; i < len_len; i++) {
+            length <<= 8;
+            length |= raw[tag.size() + 1 + i];
+        }
+        value = std::vector<uint8_t> (raw.begin() + tag.size() + 1 + len_len, raw.end());
+    } else { // one byte length
+        value = std::vector<uint8_t> (raw.begin() + tag.size() + 1, raw.end());
+    }
+    return std::make_pair(std::make_pair(tag, length), value);
+}
+
+std::pair<std::vector<uint8_t>, uint32_t> decode_TL(std::vector<uint8_t> raw) {
+    std::vector<uint8_t> tag;
+    uint32_t length;
+
+    tag.push_back(raw[0]);
+    if((tag[0] & 0x1F) == 0x1F) { //at least two bytes
+        do {
+            tag.push_back(raw[tag.size()]);
+        } while((tag.back() & 0x80) == 0x80); // continues while the upper bit is 1
+    }
+
+    length = raw[tag.size()];
+    if((length & 0x80) == 0x80) { // multi byte length
+        int len_len = length & (~0x80);
+        length = 0;
+        for(int i = 0; i < len_len; i++) {
+            length <<= 8;
+            length |= raw[tag.size() + 1 + i];
+        }
+    }
+
+    return std::make_pair(tag, length);
 }
 
 std::vector<uint8_t> pn53x_transceive(struct nfc_device *pnd, std::vector<uint8_t> tx, int timeout=5000) {
@@ -94,11 +146,11 @@ std::vector<uint8_t> read_record(struct nfc_device *pnd, uint8_t p1, uint8_t p2)
     return pn53x_transceive(pnd, read_cmd);
 }
 
-void dump_TLV(std::vector<uint8_t> data) {
+void dump_data(std::vector<uint8_t> data) {
     datafile << bytes_to_string(data);
 }
 
-void decode_TLV(std::vector<uint8_t> data) {
+void decode_data(std::vector<uint8_t> data) {
     if(data.empty())
         return;
     std::cout << "https://emvlab.org/tlvutils/?data=" << bytes_to_string(data, "", "") << std::endl;
@@ -297,7 +349,7 @@ std::map<std::string, std::vector<uint8_t>> get_AIDs(nfc_device* pnd) {
     if(!resp.empty() && resp[0] == 0x6F) {
         std::vector<uint8_t> pse(resp.begin() + 2, resp.end() - 2);
         std::cout << "[+] Got PSE/PPSE:" << std::endl << bytes_to_string(pse) << std::endl;
-        dump_TLV(pse);
+        dump_data(pse);
         AIDs = get_AIDs_from_PSE(pse);
     } else {
         AIDs = try_known_AIDs(pnd);
@@ -308,7 +360,7 @@ std::map<std::string, std::vector<uint8_t>> get_AIDs(nfc_device* pnd) {
     return AIDs;
 }
 
-std::vector<std::pair<uint16_t, uint8_t>> get_PDOL_from_SELECT_response(std::vector<uint8_t> resp) {
+std::vector<std::pair<std::vector<uint8_t>, uint32_t>> get_PDOL_from_SELECT_response(std::vector<uint8_t> resp) {
     int i = 0;
     while(i < resp.size()) {
         if(resp[i] == 0xA5) { // Proprietary information encoded in BER-TLV
@@ -319,16 +371,16 @@ std::vector<std::pair<uint16_t, uint8_t>> get_PDOL_from_SELECT_response(std::vec
                 if(resp[i] == 0x9F && resp[i + 1] == 0x38) { // Processing Options Data Object List (PDOL)
                     int pdol = i + 3;
                     int pdol_len = resp[i + 2];
-                    int pdol_end = pdol + resp[i + 2];
+                    int pdol_end = pdol + pdol_len;
                     
                     std::vector<uint8_t> PDOL_raw(resp.begin() + pdol, resp.begin() + pdol_end);
 
-                    std::vector<std::pair<uint16_t, uint8_t>> PDOL;
+                    std::vector<std::pair<std::vector<uint8_t>, uint32_t>> PDOL;
 
-                    for(int j = 0; j < PDOL_raw.size(); j += 3) {
-                        uint16_t tag = (PDOL_raw[j] << 8) | PDOL_raw[j + 1];
-                        uint8_t length = PDOL_raw[j + 2];
-                        PDOL.push_back(std::make_pair(tag, length));
+                    for(int j = 0; j < PDOL_raw.size();) {
+                        auto TL = decode_TL( std::vector<uint8_t>(PDOL_raw.begin() + j, PDOL_raw.end()) );
+                        PDOL.push_back(TL);
+                        j += TL.first.size() + 1; // FIXME would not work for multi-byte length
                     }
                     
                     return PDOL;
@@ -342,17 +394,45 @@ std::vector<std::pair<uint16_t, uint8_t>> get_PDOL_from_SELECT_response(std::vec
         }
     }
 
-    return std::vector<std::pair<uint16_t, uint8_t>>();
+    return std::vector<std::pair<std::vector<uint8_t>, uint32_t>>();
 }
 
-std::vector<uint8_t> get_capabilities_from_PDOL(std::vector<std::pair<uint16_t, uint8_t>> PDOL) {
+std::vector<uint8_t> get_capabilities_from_PDOL(std::vector<std::pair<std::vector<uint8_t>, uint32_t>> PDOL) {
     std::vector<uint8_t> capabilities({0x83, 0x00});
 
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    static std::uniform_int_distribution<uint8_t> distr;
+
     for(auto tl: PDOL) {
-        uint16_t tag = tl.first;
-        uint8_t length = tl.second;
+        uint32_t tag = 0;
+        for(auto byte: tl.first) {
+            tag <<= 8;
+            tag |= byte;
+        }
+        uint32_t length = tl.second;
 
         switch(tag) {
+            case 0x9F02: // transaction amount
+                for(int i = 0; i < length; i++)
+                    capabilities.push_back(0x00);
+                break;
+
+            case 0x9F1A: // country code
+                capabilities.push_back(0x02); //Finland
+                capabilities.push_back(0x46);
+                break;
+
+            case 0x5F2A: // transaction currency
+                capabilities.push_back(0x09); //Euro
+                capabilities.push_back(0x78);
+                break;
+
+            case 0x9F37: // Unpredictable Number
+                for(int i = 0; i < length; i++)
+                    capabilities.push_back(distr(gen));
+                break;
+
             default:
                 for(int i = 0; i < length; i++)
                     capabilities.push_back(0x00);
@@ -362,7 +442,36 @@ std::vector<uint8_t> get_capabilities_from_PDOL(std::vector<std::pair<uint16_t, 
         capabilities[1] += length;
     }
 
+    std::cout << std::dec;
+
     return capabilities;
+}
+
+std::vector<uint8_t> get_AFL_from_PO(std::vector<uint8_t> PO) {
+    int i = 0;
+    while(i < PO.size()) {
+        if(PO[i] == 0x77) { // Response Message Template Format 2
+            int rmtf_end = i + 2 + PO[i + 1];
+            i += 2;
+
+            while(i < rmtf_end) {
+                if(PO[i] == 0x94) { // AFL
+                    int afl = i + 2;
+                    int afl_len = PO[i + 1];
+                    int afl_end = afl + afl_len;
+                    
+                    return std::vector<uint8_t>(PO.begin() + afl, PO.begin() + afl_end);
+
+                } else {
+                    i += 2 + PO[i + 1];
+                }
+            }
+        } else {
+            i += 2 + PO[i + 1];              
+        }
+    }
+
+    return std::vector<uint8_t>();
 }
 
 void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
@@ -383,8 +492,8 @@ void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
             << std::setw(2) << std::setfill('0') << (unsigned int) p2 << " suceeded" << std::endl;
         std::cout << (unsigned int) resp[0] << " " << (unsigned int) resp[1] << std::endl;
         std::vector<uint8_t> tlv(resp.begin(), resp.end() - 2);
-        dump_TLV(tlv);
-        decode_TLV(tlv);
+        dump_data(tlv);
+        decode_data(tlv);
     }
 }
 
@@ -431,7 +540,7 @@ int main(int argc, char **argv) {
             for(auto AID: AIDs) {
                 std::cout << "[-] Selecting app \"" << AID.first << "\"..." << std::endl;
                 resp = select_AID(pnd, AID.second);
-                decode_TLV(resp);
+                decode_data(resp);
                 if(resp[0] != 0x6F)
                     continue;
 
@@ -440,15 +549,27 @@ int main(int argc, char **argv) {
 
                 std::cout << "[-] Getting Processing Options..." << std::endl;
                 auto capabilities = get_capabilities_from_PDOL(PDOL);
-                resp = get_processing_options(pnd, capabilities);
-                decode_TLV(resp);
+                auto PO = get_processing_options(pnd, capabilities);
+                auto AFL = get_AFL_from_PO(PO);
 
-                // Looking for data in the records
-                for (int ef = 1; ef <= 31; ef++) {
-                    for (int rec = 0; rec <= 16; rec++) {
-                        try_reading_sector(pnd, rec, (ef << 3) | 4);
+                // First search according to AFL:
+                for(int i = 0; i < AFL.size(); i+= 4) {
+                    uint8_t sfi = AFL[i];
+                    uint8_t first_rec = AFL[i + 1];
+                    uint8_t last_rec = AFL[i + 2];
+                    uint8_t ODA_recs = AFL[i + 3];
+
+                    for(int rec = first_rec; rec <= last_rec; rec++) {
+                        try_reading_sector(pnd, rec, (sfi << 3) | 4);
                     }
                 }
+
+                // Looking for data in the records
+                /*for (uint8_t ef = 1; ef <= 31; ef++) {
+                    for (uint8_t rec = 0; rec <= 16; rec++) {
+                        try_reading_sector(pnd, rec, (ef << 3) | 4);
+                    }
+                }*/
             }
             std::cout << std::endl;
         }
