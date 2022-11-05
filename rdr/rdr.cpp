@@ -39,7 +39,7 @@ std::vector<uint8_t> pn53x_transceive(struct nfc_device *pnd, std::vector<uint8_
     if(res < 0) {
         throw std::runtime_error("pn53x_transceive");
     }
-    std::vector<uint8_t> rx(abtRx, abtRx + res);
+    std::vector<uint8_t> rx(abtRx + 1, abtRx + res);
     return rx;
 }
 
@@ -83,15 +83,11 @@ std::vector<uint8_t> read_record(struct nfc_device *pnd, uint8_t p1, uint8_t p2)
     return pn53x_transceive(pnd, read_cmd);
 }
 
-std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(uint8_t * pse) {
+std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(std::vector<uint8_t> pse) {
     std::vector<std::vector<uint8_t>> result;
 
-    if(pse[0] != 0x6F)
-        return result;
-
-    int len = pse[1];
-    int i = 2;
-    while(i < len + 2) {
+    int i = 0;
+    while(i < pse.size()) {
         if(pse[i] == 0xA5) { // Proprietary information encoded in BER-TLV
             int pi_end = i + 2 + pse[i + 1];
             i += 2;
@@ -113,7 +109,7 @@ std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(uint8_t * pse) {
                                     int appid = i + 2;
                                     int appid_end = appid + appid_len;
 
-                                    std::vector<uint8_t> AID(pse + appid, pse + appid_end);
+                                    std::vector<uint8_t> AID(pse.begin() + appid, pse.begin() + appid_end);
 
                                     std::cout << "Found AID of len " << appid_len << " at " << i << ": " 
                                         << bytes_to_string(AID) << std::endl;
@@ -126,7 +122,7 @@ std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(uint8_t * pse) {
                                     int label = i + 2;
                                     int label_end = label + label_len;
 
-                                    std::string app_label( (char*)(pse + label) , label_len);
+                                    std::string app_label( (char*) &*(pse.begin() + label) , label_len);
                                     std::cout << "Found an Application label " << app_label << std::endl;
 
                                     i = label_end;
@@ -156,7 +152,30 @@ std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(uint8_t * pse) {
 
 std::vector<std::vector<uint8_t>> try_known_AIDs(nfc_device* pnd) {
     std::vector<std::vector<uint8_t>> result;
+
     return result;
+}
+
+std::vector<std::vector<uint8_t>> get_AIDs(nfc_device* pnd) {
+    std::vector<std::vector<uint8_t>> AIDs;
+
+    std::vector<uint8_t> PSE = {0x31, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31};
+    std::vector<uint8_t> PPSE = {0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31};
+
+    auto resp = select_AID(pnd, PPSE);
+    if(resp.empty())
+        resp = select_AID(pnd, PSE);
+    if(!resp.empty() && resp[0] == 0x6F) {
+        std::vector<uint8_t> pse(resp.begin() + 2, resp.end());
+        std::cout << "Got PSE/PPSE: \n" << bytes_to_string(pse) << std::endl;
+        AIDs = get_AIDs_from_PSE(pse);
+    } else {
+        AIDs = try_known_AIDs(pnd);
+    }
+
+    std::cout << "Found " << AIDs.size() << " AIDs" << std::endl;
+
+    return AIDs;
 }
 
 void decode_TLV(std::vector<uint8_t> data) {
@@ -260,11 +279,11 @@ void decode_TLV(std::vector<uint8_t> data) {
 
 void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
     auto resp = read_record(pnd, p1, p2);
-    if ( resp[1]==0x6a && (resp[2]==0x81 || resp[2]==0x82 || resp[2]==0x83)) {
+    if ( resp[0]==0x6a && (resp[1]==0x81 || resp[1]==0x82 || resp[1]==0x83)) {
         // File or application not found
         return;
     }
-    else if ( resp[1]==0x6a && resp[2]==0x86) {
+    else if ( resp[0]==0x6a && resp[1]==0x86) {
         // Wrong parameters
         return;
     }
@@ -273,7 +292,7 @@ void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
             << "> READ RECORD " << std::hex 
             << std::setw(2) << std::setfill('0') << (unsigned int) p1 << "-" 
             << std::setw(2) << std::setfill('0') << (unsigned int) p2 << " suceeded" << std::endl;
-        decode_TLV(std::vector<uint8_t>( resp.begin() + 1, resp.end() - 2 ) );
+        decode_TLV(std::vector<uint8_t>( resp.begin(), resp.end() - 2 ) );
     }
 }
 
@@ -309,24 +328,10 @@ int main(int argc, char **argv) {
     auto resp = try_starting(pnd);
     if(!resp.empty()) {
 
-        std::cout << "[-] Finding out AIDS" << std::endl;
+        std::cout << "[-] Searching for AIDs..." << std::endl;
 
-        std::vector<std::vector<uint8_t>> AIDs;
-
-        std::vector<uint8_t> PSE = {0x31, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31};
-        std::vector<uint8_t> PPSE = {0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31};
-
-        resp = select_AID(pnd, PPSE);
-        if(resp.empty())
-            resp = select_AID(pnd, PSE);
-        if(!resp.empty()) {
-            std::cout << "Got PSE/PPSE: \n" << bytes_to_string(resp) << std::endl;
-            AIDs = get_AIDs_from_PSE(resp.data() + 1);
-        } else {
-            AIDs = try_known_AIDs(pnd);
-        }
-
-        std::cout << "Found " << AIDs.size() << " AIDs" << std::endl;
+        auto AIDs = get_AIDs(pnd);
+        
         for(auto AID: AIDs) {
             select_AID(pnd, AID);
             // Looking for data in the records
