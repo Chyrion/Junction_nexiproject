@@ -9,8 +9,8 @@ import PyQt5
 
 class GUI(QtWidgets.QMainWindow):
 
-    def __init__(self,card_numbers,card_holder,AID,Key,application_label, priorities, tracks,expirations):
-        self.card_numbers=card_numbers
+    def __init__(self,card_numbers,card_holder,AID,Key,application_label, priorities, tracks,expirations,file):
+        self.card_numbers = card_numbers
         self.AID = AID
         self.Key = Key
         self.card_holder = card_holder
@@ -18,17 +18,19 @@ class GUI(QtWidgets.QMainWindow):
         self.application_label = application_label
         self.priorities = priorities
         self.expirations = expirations
+        self.file = file
+        self.dump = self.file.read()
         super().__init__()
         self.setCentralWidget(QtWidgets.QWidget())  # QMainWindown must have a centralWidget to be able to add layouts
         self.layout = QtWidgets.QVBoxLayout()  # Vertical main layout(s)
-        self.centralWidget().setLayout(self.layout) #set the main layout as the central widget
+        self.centralWidget().setLayout(self.layout)  # set the main layout as the central widget
         self.vbox = QVBoxLayout()
-        self.top_widget=QtWidgets.QWidget()
+        self.top_widget = QtWidgets.QWidget()
         self.DNA_top_layout = QtWidgets.QHBoxLayout()
         self.top_widget.setLayout(self.DNA_top_layout)
         self.init_window()
         self.add_text()
-        self.file_name=None
+
         self.button()
 
 
@@ -58,15 +60,16 @@ class GUI(QtWidgets.QMainWindow):
 
 
     def add_text(self): #adds various texts to the view and the windowtitle
-        font=15
+        font=13
         x=-0
         y_list=[-400,-300,-200,-100,0,100,200,300,400,500,600,700]
         # for y in range(-400,300,100):
         #     self.scene_top.addLine(0,y,800,y)
 
-        self.dump_label = QLabel(str(self.file))
-        self.dump_label.setFont(QFont('Arial', 20))
-        self.dump_label.move(50, 50)
+        self.dump_label = QLabel(str(self.dump))
+        self.dump_label.setFixedSize(500, 1600)
+        self.dump_label.setFont(QFont('Arial', 10))
+        self.dump_label.move(850, -400)
 
 
         self.setWindowTitle('Gimme ya wallet')
