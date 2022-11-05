@@ -30,7 +30,7 @@ for x in c:
 for x in c:
   x.lstrip()
 
-with open('out.txt', 'w') as r:
+with open('py/out.txt', 'w') as r:
   for x in c:
     r.write(f'{x}\n')
 
