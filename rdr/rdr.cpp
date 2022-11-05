@@ -8,6 +8,7 @@
 #include <iterator>
 #include <algorithm>
 #include <iostream>
+#include <fstream>
 #include <iomanip>
 #include <stdexcept>
 
@@ -22,6 +23,8 @@ extern "C" {
 	// declare func
 	int pn53x_transceive(struct nfc_device *pnd, const uint8_t *pbtTx, const size_t szTx, uint8_t *pbtRx, const size_t szRxLen, int timeout);
 }
+
+std::ofstream datafile;
 
 std::string bytes_to_string(std::vector<uint8_t> data, std::string prefix="", std::string separator="") {
     std::stringstream ss;
@@ -49,7 +52,6 @@ std::vector<uint8_t> pn53x_transceive(struct nfc_device *pnd, std::vector<uint8_
 std::vector<uint8_t> try_starting(struct nfc_device *pnd) {
     static std::vector<uint8_t> START_14443A = {0x4A, 0x01, 0x00}; //InListPassiveTarget
     static std::vector<uint8_t> START_14443B = {0x4A, 0x01, 0x03, 0x00}; //InListPassiveTarget
-
     std::vector<uint8_t> resp;
     try {
         // 14443A Card
@@ -57,10 +59,10 @@ std::vector<uint8_t> try_starting(struct nfc_device *pnd) {
     } catch(std::runtime_error ex) {}
     if (resp.size() > 0) {
         std::cout << "[+] 14443A card found!!" << std::endl;
-    } else{
+    } else {
         // 14443B Card
         try {
-            // 14443A Card
+            // 14443B Card
             resp = pn53x_transceive(pnd, START_14443B);
         } catch(std::runtime_error ex) {}
         if (resp.size() > 0) {
@@ -73,17 +75,128 @@ std::vector<uint8_t> try_starting(struct nfc_device *pnd) {
     return resp;
 }
 
-std::vector<uint8_t> select_AID(struct nfc_device *pnd, std::vector<uint8_t> AID) {
-    std::vector<uint8_t> select_cmd = {0x40, 0x01, 0x00, 0xA4, 0x04, 0x00};
-    select_cmd.push_back((uint8_t)AID.size());
+std::vector<uint8_t> select_AID(struct nfc_device *pnd, std::vector<uint8_t> AID, uint8_t p1=0x04, uint8_t p2=0x00) {
+    std::vector<uint8_t> select_cmd = {0x40, 0x01, 0x00, 0xA4, p1, p2, (uint8_t)AID.size()};
     select_cmd.insert( select_cmd.end(), AID.begin(), AID.end() );
     select_cmd.push_back(0x00);
     return pn53x_transceive(pnd, select_cmd);
 }
 
+std::vector<uint8_t> get_processing_options(nfc_device* pnd, std::vector<uint8_t> capabilities={0x83, 0x00}) {
+    std::vector<uint8_t> GPO_cmd = {0x40, 0x01, 0x80, 0xA8, 0x00, 0x00, (uint8_t)capabilities.size() };
+    GPO_cmd.insert( GPO_cmd.end(), capabilities.begin(), capabilities.end() );
+    GPO_cmd.push_back(0x00);    
+    return pn53x_transceive(pnd, GPO_cmd);
+}
+
 std::vector<uint8_t> read_record(struct nfc_device *pnd, uint8_t p1, uint8_t p2) {
     std::vector<uint8_t> read_cmd = {0x40, 0x01, 0x00, 0xB2, p1, p2, 0x00};
     return pn53x_transceive(pnd, read_cmd);
+}
+
+void dump_TLV(std::vector<uint8_t> data) {
+    datafile << bytes_to_string(data);
+}
+
+void decode_TLV(std::vector<uint8_t> data) {
+    if(data.empty())
+        return;
+    std::cout << "https://emvlab.org/tlvutils/?data=" << bytes_to_string(data, "", "") << std::endl;
+#if 0
+    /* Look for cardholder name */
+    uint8_t * res = data.data();
+    unsigned char output[50], c, amount[10],msg[100];
+    int szRx = data.size();
+    unsigned int i, j, expiry;
+    for (i=0;i<(unsigned int) szRx-1;i++) {
+            if (*res==0x5f&&*(res+1)==0x20) {
+                strncpy(output, res+3, (int) *(res+2));
+                output[(int) *(res+2)]=0;
+                printf("Cardholder name: %s\n",output);            
+            }
+            res++;
+    }
+
+    /* Look for PAN & Expiry date */
+    res = data.data();
+    for (i=0;i<(unsigned int) szRx-1;i++) {
+        if ((*res==0x4d&&*(res+1)==0x57)||(*res==0x9f&&*(res+1)==0x6b)) {
+            strncpy(output, res+3, 13);
+            output[11]=0;
+            std::cout << "PAN:";
+            
+            for (j=0;j<8;j++) {
+                if (j%2==0) std::cout << " ";
+                c = output[j];
+                if (MASKED&j>=1&j<=5) {
+                    std::cout << "**";
+                }
+                else {
+                    printf("%02x",c&0xff);
+                }
+            }
+            std::cout << std::endl;
+            expiry = (output[10]+(output[9]<<8)+(output[8]<<16))>>4;
+            printf("Expiration date: %02x/20%02x\n\n",(expiry&0xff),((expiry>>8)&0xff));
+            break;            
+        }
+        res++;
+    }       
+
+    /* Look for public certificates */
+    res = data.data();
+    szRx = data.size();
+    for (i=0;i<(unsigned int) szRx-1;i++) {
+        if (*res==0x9f && *(res+1)==0x46 && *(res+2)==0x81) {
+            printf("ICC Public Key Certificate:\n");
+            int k;
+            for (k=4;k<(int)148;k++) {
+                printf("%02x",(unsigned int)*(res+k));
+            }
+            printf("\n\n");
+            break;            
+        }
+        res++;
+    }
+    
+    /* Look for public certificates */
+    res = data.data();
+    szRx = data.size();
+    for (i=0;i<(unsigned int) szRx-1;i++) {
+        if (*res==0x90 && *(res+1)==0x81 && *(res+2)==0xb0) {
+            printf("Issuer Public Key Certificate:\n");
+            int k;
+            for (k=3;k<(int)173;k++) {
+                printf("%02x",(unsigned int)*(res+k));
+            }
+            printf("\n\n");
+            break;            
+        }
+        res++;
+    }     
+
+    // Looking for transaction logs
+    szRx = data.size();
+    if (szRx==18) { // Non-empty transaction
+        res = data.data();
+
+        /* Look for date */
+        sprintf(msg,"%02x/%02x/20%02x",res[14],res[13],res[12]);
+
+        /* Look for transaction type */
+        if (res[15]==0) {
+            sprintf(msg,"%s %s",msg,"Payment");
+        }
+        else if (res[15]==1) {
+            sprintf(msg,"%s %s",msg,"Withdrawal");
+        }
+        
+        /* Look for amount*/
+        sprintf(amount,"%02x%02x%02x",res[3],res[4],res[5]);
+        sprintf(msg,"%s\t%d,%02x€",msg,atoi(amount),res[6]);
+        printf("%s\n",msg);
+    }
+#endif
 }
 
 std::map<std::string, std::vector<uint8_t>> get_AIDs_from_PSE(std::vector<uint8_t> pse) {
@@ -182,8 +295,9 @@ std::map<std::string, std::vector<uint8_t>> get_AIDs(nfc_device* pnd) {
     if(resp.empty())
         resp = select_AID(pnd, PSE);
     if(!resp.empty() && resp[0] == 0x6F) {
-        std::vector<uint8_t> pse(resp.begin() + 2, resp.end());
+        std::vector<uint8_t> pse(resp.begin() + 2, resp.end() - 2);
         std::cout << "[+] Got PSE/PPSE:" << std::endl << bytes_to_string(pse) << std::endl;
+        dump_TLV(pse);
         AIDs = get_AIDs_from_PSE(pse);
     } else {
         AIDs = try_known_AIDs(pnd);
@@ -194,103 +308,61 @@ std::map<std::string, std::vector<uint8_t>> get_AIDs(nfc_device* pnd) {
     return AIDs;
 }
 
-void decode_TLV(std::vector<uint8_t> data) {
-    std::cout << "https://emvlab.org/tlvutils/?data=" << bytes_to_string(data) << std::endl;
-#if 0
-    /* Look for cardholder name */
-    uint8_t * res = data.data();
-    unsigned char output[50], c, amount[10],msg[100];
-    int szRx = data.size();
-    unsigned int i, j, expiry;
-    for (i=0;i<(unsigned int) szRx-1;i++) {
-            if (*res==0x5f&&*(res+1)==0x20) {
-                strncpy(output, res+3, (int) *(res+2));
-                output[(int) *(res+2)]=0;
-                printf("Cardholder name: %s\n",output);            
-            }
-            res++;
-    }
+std::vector<std::pair<uint16_t, uint8_t>> get_PDOL_from_SELECT_response(std::vector<uint8_t> resp) {
+    int i = 0;
+    while(i < resp.size()) {
+        if(resp[i] == 0xA5) { // Proprietary information encoded in BER-TLV
+            int pi_end = i + 2 + resp[i + 1];
+            i += 2;
 
-    /* Look for PAN & Expiry date */
-    res = data.data();
-    for (i=0;i<(unsigned int) szRx-1;i++) {
-        if ((*res==0x4d&&*(res+1)==0x57)||(*res==0x9f&&*(res+1)==0x6b)) {
-            strncpy(output, res+3, 13);
-            output[11]=0;
-            std::cout << "PAN:";
-            
-            for (j=0;j<8;j++) {
-                if (j%2==0) std::cout << " ";
-                c = output[j];
-                if (MASKED&j>=1&j<=5) {
-                    std::cout << "**";
-                }
-                else {
-                    printf("%02x",c&0xff);
+            while(i < pi_end) {
+                if(resp[i] == 0x9F && resp[i + 1] == 0x38) { // Processing Options Data Object List (PDOL)
+                    int pdol = i + 3;
+                    int pdol_len = resp[i + 2];
+                    int pdol_end = pdol + resp[i + 2];
+                    
+                    std::vector<uint8_t> PDOL_raw(resp.begin() + pdol, resp.begin() + pdol_end);
+
+                    std::vector<std::pair<uint16_t, uint8_t>> PDOL;
+
+                    for(int j = 0; j < PDOL_raw.size(); j += 3) {
+                        uint16_t tag = (PDOL_raw[j] << 8) | PDOL_raw[j + 1];
+                        uint8_t length = PDOL_raw[j + 2];
+                        PDOL.push_back(std::make_pair(tag, length));
+                    }
+                    
+                    return PDOL;
+
+                } else {
+                    i += 2 + resp[i + 1];
                 }
             }
-            std::cout << std::endl;
-            expiry = (output[10]+(output[9]<<8)+(output[8]<<16))>>4;
-            printf("Expiration date: %02x/20%02x\n\n",(expiry&0xff),((expiry>>8)&0xff));
-            break;            
+        } else {
+            i += 2 + resp[i + 1];              
         }
-        res++;
-    }       
-
-    /* Look for public certificates */
-    res = data.data();
-    szRx = data.size();
-    for (i=0;i<(unsigned int) szRx-1;i++) {
-        if (*res==0x9f && *(res+1)==0x46 && *(res+2)==0x81) {
-            printf("ICC Public Key Certificate:\n");
-            int k;
-            for (k=4;k<(int)148;k++) {
-                printf("%02x",(unsigned int)*(res+k));
-            }
-            printf("\n\n");
-            break;            
-        }
-        res++;
     }
-    
-    /* Look for public certificates */
-    res = data.data();
-    szRx = data.size();
-    for (i=0;i<(unsigned int) szRx-1;i++) {
-        if (*res==0x90 && *(res+1)==0x81 && *(res+2)==0xb0) {
-            printf("Issuer Public Key Certificate:\n");
-            int k;
-            for (k=3;k<(int)173;k++) {
-                printf("%02x",(unsigned int)*(res+k));
-            }
-            printf("\n\n");
-            break;            
-        }
-        res++;
-    }     
 
-    // Looking for transaction logs
-    szRx = data.size();
-    if (szRx==18) { // Non-empty transaction
-        res = data.data();
+    return std::vector<std::pair<uint16_t, uint8_t>>();
+}
 
-        /* Look for date */
-        sprintf(msg,"%02x/%02x/20%02x",res[14],res[13],res[12]);
+std::vector<uint8_t> get_capabilities_from_PDOL(std::vector<std::pair<uint16_t, uint8_t>> PDOL) {
+    std::vector<uint8_t> capabilities({0x83, 0x00});
 
-        /* Look for transaction type */
-        if (res[15]==0) {
-            sprintf(msg,"%s %s",msg,"Payment");
+    for(auto tl: PDOL) {
+        uint16_t tag = tl.first;
+        uint8_t length = tl.second;
+
+        switch(tag) {
+            default:
+                for(int i = 0; i < length; i++)
+                    capabilities.push_back(0x00);
+                break;
         }
-        else if (res[15]==1) {
-            sprintf(msg,"%s %s",msg,"Withdrawal");
-        }
-        
-        /* Look for amount*/
-        sprintf(amount,"%02x%02x%02x",res[3],res[4],res[5]);
-        sprintf(msg,"%s\t%d,%02x€",msg,atoi(amount),res[6]);
-        printf("%s\n",msg);
+
+        capabilities[1] += length;
     }
-#endif
+
+    return capabilities;
 }
 
 void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
@@ -298,16 +370,21 @@ void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
     if ( resp[0]==0x6a && (resp[1]==0x81 || resp[1]==0x82 || resp[1]==0x83)) {
         // File or application not found
         return;
-    }
-    else if ( resp[0]==0x6a && resp[1]==0x86) {
+    } else if ( resp[0]==0x6a && resp[1]==0x86) {
         // Wrong parameters
         return;
-    }
+    }/* else if ( resp[0]==0x40 || resp[0]==0x00) {
+        // Something weird
+        return;
+    }*/
     else{
         std::cout << std::endl << "> READ RECORD " << std::hex
             << std::setw(2) << std::setfill('0') << (unsigned int) p1 << "-" 
             << std::setw(2) << std::setfill('0') << (unsigned int) p2 << " suceeded" << std::endl;
-        decode_TLV(std::vector<uint8_t>( resp.begin(), resp.end() - 2 ) );
+        std::cout << (unsigned int) resp[0] << " " << (unsigned int) resp[1] << std::endl;
+        std::vector<uint8_t> tlv(resp.begin(), resp.end() - 2);
+        dump_TLV(tlv);
+        decode_TLV(tlv);
     }
 }
 
@@ -317,6 +394,8 @@ static void close(nfc_device*pnd, nfc_context* context) {
         nfc_close(pnd);
     if(context)
         nfc_exit(context);
+    if(datafile)
+        datafile.close();
 }
 
 int main(int argc, char **argv) {
@@ -324,40 +403,58 @@ int main(int argc, char **argv) {
     nfc_device* pnd;
     nfc_modulation nm;
     nfc_target ant[1];
-    
-    std::cout << "[-] Connecting to the reader..." << std::endl;
-    nfc_init(&context);
-    pnd = nfc_open(context,NULL);
-    if (pnd == NULL) {
-        std::cout << "[x] Unable to connect to NFC device." << std::endl;
-        close(pnd, context);
-        return(1);
-    }
 
-    std::cout << "[+] Connected to NFC reader" << std::endl;
-    nfc_initiator_init(pnd);
+    try {
+        std::cout << "[-] Connecting to the reader..." << std::endl;
+        nfc_init(&context);
+        pnd = nfc_open(context,NULL);
+        if (pnd == NULL) {
+            std::cout << "[x] Unable to connect to NFC device." << std::endl;
+            close(pnd, context);
+            return(1);
+        }
 
-    // Checking card type...
-    std::cout << "[-] Looking for known card types..." << std::endl;
-    
-    auto resp = try_starting(pnd);
-    if(!resp.empty()) {
+        std::cout << "[+] Connected to NFC reader" << std::endl;
+        nfc_initiator_init(pnd);
 
-        std::cout << "[-] Searching for AIDs..." << std::endl;
-
-        auto AIDs = get_AIDs(pnd);
+        // Checking card type...
+        std::cout << "[-] Trying to start..." << std::endl;
         
-        for(auto AID: AIDs) {
-            std::cout << "[-] Selecting app \"" << AID.first << "\"..." << std::endl; 
-            select_AID(pnd, AID.second);
-            // Looking for data in the records
-            for (int p1 = 0; p1 <= 10; p1 += 1) {
-                for (int p2 = 12; p2 <= 28; p2 += 8) {
-                    try_reading_sector(pnd, p1, p2);
+        auto resp = try_starting(pnd);
+        if(!resp.empty()) {
+            datafile.open("data.txt");
+
+            std::cout << "[-] Searching for AIDs..." << std::endl;
+
+            auto AIDs = get_AIDs(pnd);
+            
+            for(auto AID: AIDs) {
+                std::cout << "[-] Selecting app \"" << AID.first << "\"..." << std::endl;
+                resp = select_AID(pnd, AID.second);
+                decode_TLV(resp);
+                if(resp[0] != 0x6F)
+                    continue;
+
+                resp = std::vector<uint8_t>(resp.begin() + 2, resp.end() - 2);
+                auto PDOL = get_PDOL_from_SELECT_response(resp);
+
+                std::cout << "[-] Getting Processing Options..." << std::endl;
+                auto capabilities = get_capabilities_from_PDOL(PDOL);
+                resp = get_processing_options(pnd, capabilities);
+                decode_TLV(resp);
+
+                // Looking for data in the records
+                for (int ef = 1; ef <= 31; ef++) {
+                    for (int rec = 0; rec <= 16; rec++) {
+                        try_reading_sector(pnd, rec, (ef << 3) | 4);
+                    }
                 }
             }
+            std::cout << std::endl;
         }
-        std::cout << std::endl;
+    } catch(std::runtime_error ex) {
+        close(pnd, context);
+        throw ex;
     }
 
     close(pnd, context);
