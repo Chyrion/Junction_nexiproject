@@ -125,6 +125,124 @@ std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(uint8_t * pse) {
     }
 }
 
+void decode_TLV(std::vector<uint8_t> data) {
+    std::cout << "https://emvlab.org/tlvutils/?data="; show(data); std::cout << std::endl;
+
+
+    /* Look for cardholder name */
+    uint8_t * res = data.data();
+    unsigned char output[50], c, amount[10],msg[100];
+    int szRx = data.size();
+    unsigned int i, j, expiry;
+    for (i=0;i<(unsigned int) szRx-1;i++) {
+            if (*res==0x5f&&*(res+1)==0x20) {
+                strncpy(output, res+3, (int) *(res+2));
+                output[(int) *(res+2)]=0;
+                printf("Cardholder name: %s\n",output);            
+            }
+            res++;
+    }
+
+    /* Look for PAN & Expiry date */
+    res = data.data();
+    for (i=0;i<(unsigned int) szRx-1;i++) {
+        if ((*res==0x4d&&*(res+1)==0x57)||(*res==0x9f&&*(res+1)==0x6b)) {
+            strncpy(output, res+3, 13);
+            output[11]=0;
+            printf("PAN:");
+            
+            for (j=0;j<8;j++) {
+                if (j%2==0) printf(" ");
+                c = output[j];
+                if (MASKED&j>=1&j<=5) {
+                    printf("**");
+                }
+                else {
+                    printf("%02x",c&0xff);
+                }
+            }
+            printf("\n");
+            expiry = (output[10]+(output[9]<<8)+(output[8]<<16))>>4;
+            printf("Expiration date: %02x/20%02x\n\n",(expiry&0xff),((expiry>>8)&0xff));
+            break;            
+        }
+        res++;
+    }       
+
+    /* Look for public certificates */
+    res = data.data();
+    szRx = data.size();
+    for (i=0;i<(unsigned int) szRx-1;i++) {
+        if (*res==0x9f && *(res+1)==0x46 && *(res+2)==0x81) {
+            printf("ICC Public Key Certificate:\n");
+            int k;
+            for (k=4;k<(int)148;k++) {
+                printf("%02x",(unsigned int)*(res+k));
+            }
+            printf("\n\n");
+            break;            
+        }
+        res++;
+    }
+    
+    /* Look for public certificates */
+    res = data.data();
+    szRx = data.size();
+    for (i=0;i<(unsigned int) szRx-1;i++) {
+        if (*res==0x90 && *(res+1)==0x81 && *(res+2)==0xb0) {
+            printf("Issuer Public Key Certificate:\n");
+            int k;
+            for (k=3;k<(int)173;k++) {
+                printf("%02x",(unsigned int)*(res+k));
+            }
+            printf("\n\n");
+            break;            
+        }
+        res++;
+    }     
+
+    // Looking for transaction logs
+    szRx = data.size();
+    if (szRx==18) { // Non-empty transaction
+        //show(szRx, abtRx);
+        res = data.data();
+
+        /* Look for date */
+        sprintf(msg,"%02x/%02x/20%02x",res[14],res[13],res[12]);
+
+        /* Look for transaction type */
+        if (res[15]==0) {
+            sprintf(msg,"%s %s",msg,"Payment");
+        }
+        else if (res[15]==1) {
+            sprintf(msg,"%s %s",msg,"Withdrawal");
+        }
+        
+        /* Look for amount*/
+        sprintf(amount,"%02x%02x%02x",res[3],res[4],res[5]);
+        sprintf(msg,"%s\t%d,%02x€",msg,atoi(amount),res[6]);
+        printf("%s\n",msg);
+    }
+}
+
+void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
+    auto resp = read_record(pnd, p1, p2);
+    if ( resp[1]==0x6a && (resp[2]==0x82 || resp[2]==0x83)) {
+        // File or application not found
+        return;
+    }
+    else if ( resp[1]==0x6a && resp[2]==0x86) {
+        // Wrong parameters
+        return;
+    }
+    else{
+        printf("\n-------------------------------------\n");
+        printf("> READ RECORD %02x-%02x suceeded\n",p1,p2);
+        //show(resp); printf("\n");
+        decode_TLV(std::vector<uint8_t>( resp.begin() + 1, resp.end() ) );
+    }
+}
+
 static void close(nfc_device*pnd, nfc_context* context) {
     printf("[-] Closing device\n");
     if(pnd)
@@ -197,114 +315,9 @@ int main(int argc, char **argv) {
     for(auto AID: AIDs) {
         select_AID(pnd, AID);
         // Looking for data in the records
-        for (uint8_t p1 = 0; p1 < 10; p1 += 1) {
-            for (uint8_t p2 = 12; p2 < 28; p2 += 8) {
-                resp = read_record(pnd, p1, p2);
-                if ( resp[1]==0x6a && (resp[2]==0x82 || resp[2]==0x83)) {
-                    // File or application not found
-                    continue;
-                }
-                else if ( resp[1]==0x6a && resp[2]==0x86) {
-                    // Wrong parameters
-                    continue;
-                }
-                else{
-                    //printf("\n> READ RECORD %2x-%2x suceeded\n",p1,p2);
-                    /* Look for cardholder name */
-                    uint8_t * res = resp.data();
-                    unsigned char output[50], c, amount[10],msg[100];
-                    int szRx = resp.size();
-                    unsigned int i, j, expiry;
-                    for (i=0;i<(unsigned int) szRx-1;i++) {
-                            if (*res==0x5f&&*(res+1)==0x20) {
-                                strncpy(output, res+3, (int) *(res+2));
-                                output[(int) *(res+2)]=0;
-                                printf("Cardholder name: %s\n",output);            
-                            }
-                            res++;
-                    }
-
-                    /* Look for PAN & Expiry date */
-                    res = resp.data();
-                    for (i=0;i<(unsigned int) szRx-1;i++) {
-                        if ((*res==0x4d&&*(res+1)==0x57)||(*res==0x9f&&*(res+1)==0x6b)) {
-                            strncpy(output, res+3, 13);
-                            output[11]=0;
-                            printf("PAN:");
-                            
-                            for (j=0;j<8;j++) {
-                                if (j%2==0) printf(" ");
-                                c = output[j];
-                                if (MASKED&j>=1&j<=5) {
-                                    printf("**");
-                                }
-                                else {
-                                    printf("%02x",c&0xff);
-                                }
-                            }
-                            printf("\n");
-                            expiry = (output[10]+(output[9]<<8)+(output[8]<<16))>>4;
-                            printf("Expiration date: %02x/20%02x\n\n",(expiry&0xff),((expiry>>8)&0xff));
-                            break;            
-                        }
-                        res++;
-                    }       
-           
-                    /* Look for public certificates */
-                    res = resp.data();
-                    szRx = resp.size();
-                    for (i=0;i<(unsigned int) szRx-1;i++) {
-                        if (*res==0x9f && *(res+1)==0x46 && *(res+2)==0x81) {
-                            printf("ICC Public Key Certificate:\n");
-                            int k;
-                            for (k=4;k<(int)148;k++) {
-                                printf("%02x",(unsigned int)*(res+k));
-                            }
-                            printf("\n\n");
-                            break;            
-                        }
-                        res++;
-                    }
-                    
-                    /* Look for public certificates */
-                    res = resp.data();
-                    szRx = resp.size();
-                    for (i=0;i<(unsigned int) szRx-1;i++) {
-                        if (*res==0x90 && *(res+1)==0x81 && *(res+2)==0xb0) {
-                            printf("Issuer Public Key Certificate:\n");
-                            int k;
-                            for (k=3;k<(int)173;k++) {
-                                printf("%02x",(unsigned int)*(res+k));
-                            }
-                            printf("\n\n");
-                            break;            
-                        }
-                        res++;
-                    }     
-            
-                    // Looking for transaction logs
-                    szRx = resp.size();
-                    if (szRx==18) { // Non-empty transaction
-                        //show(szRx, abtRx);
-                        res = resp.data();
-
-                        /* Look for date */
-                        sprintf(msg,"%02x/%02x/20%02x",res[14],res[13],res[12]);
-
-                        /* Look for transaction type */
-                        if (res[15]==0) {
-                            sprintf(msg,"%s %s",msg,"Payment");
-                        }
-                        else if (res[15]==1) {
-                            sprintf(msg,"%s %s",msg,"Withdrawal");
-                        }
-                        
-                        /* Look for amount*/
-                        sprintf(amount,"%02x%02x%02x",res[3],res[4],res[5]);
-                        sprintf(msg,"%s\t%d,%02x€",msg,atoi(amount),res[6]);
-                        printf("%s\n",msg);
-                    }
-                }
+        for (int p1 = 0; p1 <= 10; p1 += 1) {
+            for (int p2 = 12; p2 <= 28; p2 += 8) {
+                try_reading_sector(pnd, p1, p2);
             }
         }
     }

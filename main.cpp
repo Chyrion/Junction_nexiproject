@@ -3,7 +3,7 @@
 extern "C" {
   #include <nfc/nfc.h>
   #include <nfc/nfc-types.h>
-  int pn53x_transceive(struct nfc_device *pnd, const uint8_t *pbtTx, const size_t szTx, uint8_t *pbtRx, const size_t szRxLen, int timeout);
+  #include <nfc/pn53x.h>
 }
 
 #define MAX_FRAME_LEN 300
