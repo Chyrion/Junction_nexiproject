@@ -11,9 +11,9 @@ b = a.split('\\x1b')
 c = []
 
 for text in b:
-  m = re.sub(r'\[\d{1,2}[m;](\d{2}m)?(\\n)?(\s*)((\\[x])(.{2}))*|(\\[x])(.{2})|\[|\]|(Size:.*\n)|^\s/gm', '', str(text))
+  m = re.sub(r'\[\d{1,2}[m;](\d{2}m)?(\\n)?(\s*)((\\[x])(.{2}))*|(\\[x])(.{2})|\[|\]|(Size:.*)|^\s', '', str(text))
   m = re.sub(r'^\s*', '', m)
-  m = re.sub(r'(S[a-z]{3}:\s)(\d{2})(\sbyte(s)?)', '', m)
+  m = re.sub(r'^[A-Z0-9]{2,4}(?!.)|.*(?=(Template))(Template)|(Size:.*)', '', m)
   c.append(m)
 
 while "   " in c:
@@ -30,4 +30,9 @@ for x in c:
 for x in c:
   x.lstrip()
 
-print(c)
+with open('out.txt', 'w') as r:
+  for x in c:
+    r.write(f'{x}\n')
+
+r.close()
+#print(c)
