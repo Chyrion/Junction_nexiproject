@@ -4,6 +4,7 @@
 
 #include <vector>
 #include <string>
+#include <map>
 #include <iostream>
 #include <iomanip>
 #include <stdexcept>
@@ -83,10 +84,11 @@ std::vector<uint8_t> read_record(struct nfc_device *pnd, uint8_t p1, uint8_t p2)
     return pn53x_transceive(pnd, read_cmd);
 }
 
-std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(std::vector<uint8_t> pse) {
-    std::vector<std::vector<uint8_t>> result;
+std::map<std::string, std::vector<uint8_t>> get_AIDs_from_PSE(std::vector<uint8_t> pse) {
+    std::map<std::string, std::vector<uint8_t>> result;
 
     int i = 0;
+    int app_index = 0;
     while(i < pse.size()) {
         if(pse[i] == 0xA5) { // Proprietary information encoded in BER-TLV
             int pi_end = i + 2 + pse[i + 1];
@@ -100,8 +102,11 @@ std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(std::vector<uint8_t> pse) {
                     while(i < fci_end) {
                         if(pse[i] == 0x61) { // Application template
                             int app_end = i + 2 + pse[i + 1];
-                            std::cout << "Found Application template at " << i << " until " << app_end << std::endl;
+                            std::cout << "[+] Found Application template at " << i << " until " << app_end << std::endl;
                             i += 2;
+
+                            std::vector<uint8_t> AID;
+                            std::string app_lable("UNLABLED AID #" + app_index++);
 
                             while(i < app_end) {
                                 if(pse[i] == 0x4F) { // Application ID
@@ -109,29 +114,29 @@ std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(std::vector<uint8_t> pse) {
                                     int appid = i + 2;
                                     int appid_end = appid + appid_len;
 
-                                    std::vector<uint8_t> AID(pse.begin() + appid, pse.begin() + appid_end);
+                                    AID = std::vector<uint8_t>(pse.begin() + appid, pse.begin() + appid_end);
 
-                                    std::cout << "Found AID of len " << appid_len << " at " << i << ": " 
+                                    std::cout << "[+] Found AID of len " << appid_len << " at " << i << ": " 
                                         << bytes_to_string(AID) << std::endl;
 
-                                    result.push_back(AID);
-
                                     i = appid_end;
-                                } else if(pse[i] == 0x50) { // Application Label
-                                    int label_len = pse[i + 1];
-                                    int label = i + 2;
-                                    int label_end = label + label_len;
+                                } else if(pse[i] == 0x50) { // Application Lable
+                                    int lable_len = pse[i + 1];
+                                    int lable = i + 2;
+                                    int lable_end = lable + lable_len;
 
-                                    std::string app_label( (char*) &*(pse.begin() + label) , label_len);
-                                    std::cout << "Found an Application label " << app_label << std::endl;
+                                    app_lable = std::string( (char*) &*(pse.begin() + lable) , lable_len);
+                                    std::cout << "[+] Found an Application lable " << app_lable << std::endl;
 
-                                    i = label_end;
+                                    i = lable_end;
                                 } else if(pse[i] == 0x9F && pse[i + 1] == 0x0A) { // Application Selection Registered Proprietary Data
                                     i += 3 + pse[i + 2]; // ignored
                                 } else {
                                     i += 2 + pse[i + 1];
                                 }
                             }
+                            result[app_lable] = AID;
+
                             i = app_end;
                         } else {
                             i += 2 + pse[i + 1];
@@ -150,14 +155,14 @@ std::vector<std::vector<uint8_t>> get_AIDs_from_PSE(std::vector<uint8_t> pse) {
     return result;
 }
 
-std::vector<std::vector<uint8_t>> try_known_AIDs(nfc_device* pnd) {
-    std::vector<std::vector<uint8_t>> result;
+std::map<std::string, std::vector<uint8_t>> try_known_AIDs(nfc_device* pnd) {
+    std::map<std::string, std::vector<uint8_t>> result;
 
     return result;
 }
 
-std::vector<std::vector<uint8_t>> get_AIDs(nfc_device* pnd) {
-    std::vector<std::vector<uint8_t>> AIDs;
+std::map<std::string, std::vector<uint8_t>> get_AIDs(nfc_device* pnd) {
+    std::map<std::string, std::vector<uint8_t>> AIDs;
 
     std::vector<uint8_t> PSE = {0x31, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31};
     std::vector<uint8_t> PPSE = {0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31};
@@ -167,13 +172,13 @@ std::vector<std::vector<uint8_t>> get_AIDs(nfc_device* pnd) {
         resp = select_AID(pnd, PSE);
     if(!resp.empty() && resp[0] == 0x6F) {
         std::vector<uint8_t> pse(resp.begin() + 2, resp.end());
-        std::cout << "Got PSE/PPSE: \n" << bytes_to_string(pse) << std::endl;
+        std::cout << "[+] Got PSE/PPSE: \n" << bytes_to_string(pse) << std::endl;
         AIDs = get_AIDs_from_PSE(pse);
     } else {
         AIDs = try_known_AIDs(pnd);
     }
 
-    std::cout << "Found " << AIDs.size() << " AIDs" << std::endl;
+    std::cout << "[+] Found " << AIDs.size() << " AIDs" << std::endl;
 
     return AIDs;
 }
@@ -288,8 +293,7 @@ void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
         return;
     }
     else{
-        std::cout << std::endl << "-------------------------------------" << std::endl
-            << "> READ RECORD " << std::hex 
+        std::cout << std::endl << "> READ RECORD " << std::hex
             << std::setw(2) << std::setfill('0') << (unsigned int) p1 << "-" 
             << std::setw(2) << std::setfill('0') << (unsigned int) p2 << " suceeded" << std::endl;
         decode_TLV(std::vector<uint8_t>( resp.begin(), resp.end() - 2 ) );
@@ -297,7 +301,7 @@ void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
 }
 
 static void close(nfc_device*pnd, nfc_context* context) {
-    std::cout << "[-] Closing device" << std::endl;
+    std::cout << "[-] Closing device..." << std::endl;
     if(pnd)
         nfc_close(pnd);
     if(context)
@@ -333,7 +337,8 @@ int main(int argc, char **argv) {
         auto AIDs = get_AIDs(pnd);
         
         for(auto AID: AIDs) {
-            select_AID(pnd, AID);
+            std::cout << "[-] Selecting app \"" << AID.first << "\"..." << std::endl; 
+            select_AID(pnd, AID.second);
             // Looking for data in the records
             for (int p1 = 0; p1 <= 10; p1 += 1) {
                 for (int p2 = 12; p2 <= 28; p2 += 8) {
@@ -341,6 +346,7 @@ int main(int argc, char **argv) {
                 }
             }
         }
+        std::cout << std::endl;
     }
 
     close(pnd, context);
