@@ -5,6 +5,8 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <iterator>
+#include <algorithm>
 #include <iostream>
 #include <iomanip>
 #include <stdexcept>
@@ -156,7 +158,16 @@ std::map<std::string, std::vector<uint8_t>> get_AIDs_from_PSE(std::vector<uint8_
 }
 
 std::map<std::string, std::vector<uint8_t>> try_known_AIDs(nfc_device* pnd) {
+    #include "known_AIDs.hpp"
     std::map<std::string, std::vector<uint8_t>> result;
+
+    std::cout << "[-] Trying known AIDs..." << std::endl;
+
+    std::copy_if(known_AIDs.begin(), known_AIDs.end(), std::inserter(result,result.end()), [pnd](auto AID) {
+        auto resp = select_AID(pnd, AID.second);
+
+        return resp[0] == 0x6F;
+    });
 
     return result;
 }
@@ -172,7 +183,7 @@ std::map<std::string, std::vector<uint8_t>> get_AIDs(nfc_device* pnd) {
         resp = select_AID(pnd, PSE);
     if(!resp.empty() && resp[0] == 0x6F) {
         std::vector<uint8_t> pse(resp.begin() + 2, resp.end());
-        std::cout << "[+] Got PSE/PPSE: \n" << bytes_to_string(pse) << std::endl;
+        std::cout << "[+] Got PSE/PPSE:" << std::endl << bytes_to_string(pse) << std::endl;
         AIDs = get_AIDs_from_PSE(pse);
     } else {
         AIDs = try_known_AIDs(pnd);
