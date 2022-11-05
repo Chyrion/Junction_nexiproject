@@ -85,7 +85,6 @@ std::pair<std::vector<uint8_t>, uint32_t> decode_TL(std::vector<uint8_t> raw) {
             length |= raw[tag.size() + 1 + i];
         }
     }
-    std::cout << bytes_to_string(tag) << " " << length << std::endl;
 
     return std::make_pair(tag, length);
 }
@@ -255,7 +254,6 @@ std::map<std::string, std::vector<uint8_t>> get_AIDs(nfc_device* pnd) {
     if(!resp.empty() && resp[0] == 0x6F) {
         std::vector<uint8_t> pse(resp.begin() + 2, resp.end() - 2);
         std::cout << "[+] Got PSE/PPSE" << std::endl;
-        pse = std::vector<uint8_t>(pse.begin(), pse.end() - 2);
         decode_data(pse);
         dump_data(pse);
         AIDs = get_AIDs_from_PSE(pse);
@@ -400,7 +398,7 @@ std::vector<uint8_t> get_AFL_from_PO(std::vector<uint8_t> PO) {
     return std::vector<uint8_t>();
 }
 
-void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
+void try_reading_record(nfc_device* pnd, uint8_t p1, uint8_t p2) {
     auto resp = read_record(pnd, p1, p2);
     if ( resp[0]==0x6a && (resp[1]==0x81 || resp[1]==0x82 || resp[1]==0x83)) {
         // File or application not found
@@ -408,10 +406,16 @@ void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
     } else if ( resp[0]==0x6a && resp[1]==0x86) {
         // Wrong parameters
         return;
-    }/* else if ( resp[0]==0x40 || resp[0]==0x00) {
+    } else if ( resp[0]==0x69) {
+        // Nice, but all those are also errors (
+        return;
+    } else if ( resp[0]==0x6F) {
+        // Command aborted / card dead
+        return;
+    } else if ( resp[0]==0x40 || resp[0]==0x00 || resp[0]==0x08 || resp[0]==0x09 ) {
         // Something weird
         return;
-    }*/
+    }
     else{
         std::cout << std::endl << "> READ RECORD " << std::hex
             << std::setw(2) << std::setfill('0') << (unsigned int) p1 << "-" 
@@ -456,12 +460,8 @@ int main(int argc, char **argv) {
         std::cout << "[-] Trying to start..." << std::endl;
         
         auto start_resp = try_starting(pnd);
-        decode_data(start_resp);
         if(!start_resp.empty()) {
             datafile.open("data.txt");
-
-            start_resp = std::vector<uint8_t>(start_resp.begin(), start_resp.end() - 2);
-            dump_data(start_resp);
 
             std::cout << "[-] Searching for AIDs..." << std::endl;
 
@@ -484,12 +484,11 @@ int main(int argc, char **argv) {
                 auto PO = get_processing_options(pnd, capabilities);
                 decode_data(PO);
 
-                if(*(PO.end() - 2) == 0x90) {
+                if(*(PO.end() - 2) == 0x90) { // Search according to AFL:
                     PO = std::vector<uint8_t>(PO.begin(), PO.end() - 2);
                     dump_data(PO);
 
                     auto AFL = get_AFL_from_PO(PO);
-                    // Search according to AFL:
                     std::cout << "[-] Trying to read according to Processing Options..." << std::endl;
                     for(int i = 0; i < AFL.size(); i+= 4) {
                         uint8_t sfi = AFL[i];
@@ -499,17 +498,19 @@ int main(int argc, char **argv) {
 
                         for(int rec = first_rec; rec <= last_rec; rec++) {
                             std::cout << "[-] Reading sfi " << (unsigned int) sfi << " record " << rec << std::endl;
-                            try_reading_sector(pnd, rec, (sfi << 3) | 4);
+                            try_reading_record(pnd, rec, (sfi << 3) | 4);
                         }
                     }
                 }
 
-                // Looking for data in the records
-                /*for (uint8_t ef = 1; ef <= 31; ef++) {
-                    for (uint8_t rec = 0; rec <= 16; rec++) {
-                        try_reading_sector(pnd, rec, (ef << 3) | 4);
+                if(true) { // Looking for data by educated bruteforce
+                    std::cout << "[-] Looking for data by educated bruteforce..." << std::endl;
+                    for (uint8_t ef = 1; ef <= 31; ef++) {
+                        for (uint8_t rec = 0; rec <= 16; rec++) {
+                            try_reading_record(pnd, rec, (ef << 3) | 4);
+                        }
                     }
-                }*/
+                }
             }
             std::cout << std::endl;
         }
