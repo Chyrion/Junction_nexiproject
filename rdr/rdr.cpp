@@ -85,6 +85,7 @@ std::pair<std::vector<uint8_t>, uint32_t> decode_TL(std::vector<uint8_t> raw) {
             length |= raw[tag.size() + 1 + i];
         }
     }
+    std::cout << bytes_to_string(tag) << " " << length << std::endl;
 
     return std::make_pair(tag, length);
 }
@@ -348,7 +349,9 @@ std::map<std::string, std::vector<uint8_t>> get_AIDs(nfc_device* pnd) {
         resp = select_AID(pnd, PSE);
     if(!resp.empty() && resp[0] == 0x6F) {
         std::vector<uint8_t> pse(resp.begin() + 2, resp.end() - 2);
-        std::cout << "[+] Got PSE/PPSE:" << std::endl << bytes_to_string(pse) << std::endl;
+        std::cout << "[+] Got PSE/PPSE" << std::endl;
+        pse = std::vector<uint8_t>(pse.begin(), pse.end() - 2);
+        decode_data(pse);
         dump_data(pse);
         AIDs = get_AIDs_from_PSE(pse);
     } else {
@@ -363,30 +366,39 @@ std::map<std::string, std::vector<uint8_t>> get_AIDs(nfc_device* pnd) {
 std::vector<std::pair<std::vector<uint8_t>, uint32_t>> get_PDOL_from_SELECT_response(std::vector<uint8_t> resp) {
     int i = 0;
     while(i < resp.size()) {
-        if(resp[i] == 0xA5) { // Proprietary information encoded in BER-TLV
-            int pi_end = i + 2 + resp[i + 1];
+        if(resp[i] == 0x6F) { // File Control Information (FCI) Template
+            int fci_end = i + 2 + resp[i + 1];
             i += 2;
 
-            while(i < pi_end) {
-                if(resp[i] == 0x9F && resp[i + 1] == 0x38) { // Processing Options Data Object List (PDOL)
-                    int pdol = i + 3;
-                    int pdol_len = resp[i + 2];
-                    int pdol_end = pdol + pdol_len;
-                    
-                    std::vector<uint8_t> PDOL_raw(resp.begin() + pdol, resp.begin() + pdol_end);
+            while(i < fci_end) {
+                if(resp[i] == 0xA5) { // File Control Information (FCI) Proprietary Template
+                    int pi_end = i + 2 + resp[i + 1];
+                    i += 2;
 
-                    std::vector<std::pair<std::vector<uint8_t>, uint32_t>> PDOL;
+                    while(i < pi_end) {
+                        if(resp[i] == 0x9F && resp[i + 1] == 0x38) { // Processing Options Data Object List (PDOL)
+                            int pdol = i + 3;
+                            int pdol_len = resp[i + 2];
+                            int pdol_end = pdol + pdol_len;
+                            
+                            std::vector<uint8_t> PDOL_raw(resp.begin() + pdol, resp.begin() + pdol_end);
 
-                    for(int j = 0; j < PDOL_raw.size();) {
-                        auto TL = decode_TL( std::vector<uint8_t>(PDOL_raw.begin() + j, PDOL_raw.end()) );
-                        PDOL.push_back(TL);
-                        j += TL.first.size() + 1; // FIXME would not work for multi-byte length
+                            std::vector<std::pair<std::vector<uint8_t>, uint32_t>> PDOL;
+
+                            for(int j = 0; j < PDOL_raw.size();) {
+                                auto TL = decode_TL( std::vector<uint8_t>(PDOL_raw.begin() + j, PDOL_raw.end()) );
+                                PDOL.push_back(TL);
+                                j += TL.first.size() + 1; // FIXME would not work for multi-byte length
+                            }
+                            
+                            return PDOL;
+
+                        } else {
+                            i += 2 + resp[i + 1];
+                        }
                     }
-                    
-                    return PDOL;
-
                 } else {
-                    i += 2 + resp[i + 1];
+                    i += 2 + resp[i + 1];              
                 }
             }
         } else {
@@ -431,6 +443,15 @@ std::vector<uint8_t> get_capabilities_from_PDOL(std::vector<std::pair<std::vecto
             case 0x9F37: // Unpredictable Number
                 for(int i = 0; i < length; i++)
                     capabilities.push_back(distr(gen));
+                break;
+
+            case 0x9F66: // Terminal Transaction Qualifiers
+                // This seems to be proprietary to VISA.
+                // https://mstcompany.net/blog/acquiring-emv-transaction-flow-part-4-pdol-and-contactless-cards-characteristic-features-of-qvsdc-and-quics
+                capabilities.push_back(0x36);
+                capabilities.push_back(0xA0);
+                capabilities.push_back(0x40);
+                capabilities.push_back(0x00);
                 break;
 
             default:
@@ -492,8 +513,8 @@ void try_reading_sector(nfc_device* pnd, uint8_t p1, uint8_t p2) {
             << std::setw(2) << std::setfill('0') << (unsigned int) p2 << " suceeded" << std::endl;
         std::cout << (unsigned int) resp[0] << " " << (unsigned int) resp[1] << std::endl;
         std::vector<uint8_t> tlv(resp.begin(), resp.end() - 2);
-        dump_data(tlv);
         decode_data(tlv);
+        dump_data(tlv);
     }
 }
 
@@ -529,9 +550,13 @@ int main(int argc, char **argv) {
         // Checking card type...
         std::cout << "[-] Trying to start..." << std::endl;
         
-        auto resp = try_starting(pnd);
-        if(!resp.empty()) {
+        auto start_resp = try_starting(pnd);
+        decode_data(start_resp);
+        if(!start_resp.empty()) {
             datafile.open("data.txt");
+
+            start_resp = std::vector<uint8_t>(start_resp.begin(), start_resp.end() - 2);
+            dump_data(start_resp);
 
             std::cout << "[-] Searching for AIDs..." << std::endl;
 
@@ -539,28 +564,38 @@ int main(int argc, char **argv) {
             
             for(auto AID: AIDs) {
                 std::cout << "[-] Selecting app \"" << AID.first << "\"..." << std::endl;
-                resp = select_AID(pnd, AID.second);
-                decode_data(resp);
-                if(resp[0] != 0x6F)
+                auto select_resp = select_AID(pnd, AID.second);
+                
+                decode_data(select_resp);
+                if(select_resp[0] != 0x6F)
                     continue;
 
-                resp = std::vector<uint8_t>(resp.begin() + 2, resp.end() - 2);
-                auto PDOL = get_PDOL_from_SELECT_response(resp);
+                select_resp = std::vector<uint8_t>(select_resp.begin(), select_resp.end() - 2);
+                dump_data(select_resp);
 
                 std::cout << "[-] Getting Processing Options..." << std::endl;
+                auto PDOL = get_PDOL_from_SELECT_response(select_resp);
                 auto capabilities = get_capabilities_from_PDOL(PDOL);
                 auto PO = get_processing_options(pnd, capabilities);
-                auto AFL = get_AFL_from_PO(PO);
+                decode_data(PO);
 
-                // First search according to AFL:
-                for(int i = 0; i < AFL.size(); i+= 4) {
-                    uint8_t sfi = AFL[i];
-                    uint8_t first_rec = AFL[i + 1];
-                    uint8_t last_rec = AFL[i + 2];
-                    uint8_t ODA_recs = AFL[i + 3];
+                if(*(PO.end() - 2) == 0x90) {
+                    PO = std::vector<uint8_t>(PO.begin(), PO.end() - 2);
+                    dump_data(PO);
 
-                    for(int rec = first_rec; rec <= last_rec; rec++) {
-                        try_reading_sector(pnd, rec, (sfi << 3) | 4);
+                    auto AFL = get_AFL_from_PO(PO);
+                    // Search according to AFL:
+                    std::cout << "[-] Trying to read according to Processing Options..." << std::endl;
+                    for(int i = 0; i < AFL.size(); i+= 4) {
+                        uint8_t sfi = AFL[i];
+                        uint8_t first_rec = AFL[i + 1];
+                        uint8_t last_rec = AFL[i + 2];
+                        uint8_t ODA_recs = AFL[i + 3];
+
+                        for(int rec = first_rec; rec <= last_rec; rec++) {
+                            std::cout << "[-] Reading sfi " << (unsigned int) sfi << " record " << rec << std::endl;
+                            try_reading_sector(pnd, rec, (sfi << 3) | 4);
+                        }
                     }
                 }
 
