@@ -5,7 +5,9 @@ import subprocess
 #import parser #this script handles formatting the TLV data     my script crashes on my system when this isnt commented out
 import re
 def executor(): #executes the C++ scripts. And python regex script. Gives data file to this python script to read and display
-    proc = subprocess.Popen(["./nfc", c - script], stdout=subprocess.PIPE, shell=True)
+    proc = subprocess.Popen(["g++ ./rdr/rdr.cpp -std=c++17 -fpermissive -lnfc -o ./rdr/rdr | ./rdr/rdr"], stdout=subprocess.PIPE, shell=True)
+    proc.wait()
+    proc = subprocess.Popen(["python3 ./py/parser.py"])
     proc.wait()
     #(out, err) = proc.communicate()
 
@@ -111,6 +113,7 @@ def reader1(file):
 def main():
     #print(reader1("output.txt"))
     # Start the Qt event loop. (i.e. make it possible to interact with the gui)
+    executor()
     global app  # Use global to prevent crashing on exit
     app = QApplication(sys.argv)
 

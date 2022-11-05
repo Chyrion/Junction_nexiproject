@@ -3,9 +3,9 @@ import re
 import platform
 
 if (platform.system() == 'Linux'):
-  p = subprocess.run(["./py/tlvp", "./py/data.txt"], capture_output=True)
+  p = subprocess.run(["./py/tlvp", "./data.txt"], capture_output=True)
 elif (platform.system() == 'Windows'):
-  p = subprocess.run(["./py/tlvp.exe", "./py/data.txt"], capture_output=True)
+  p = subprocess.run(["./py/tlvp.exe", "./data.txt"], capture_output=True)
 a = str(p)[78:]
 b = a.split('\\x1b')
 c = []
@@ -33,6 +33,8 @@ for x in c:
 with open('py/out.txt', 'w') as r:
   for x in c:
     r.write(f'{x}\n')
+
+print(c)
 
 r.close()
 #print(c)
