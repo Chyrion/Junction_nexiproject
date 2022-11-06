@@ -8,13 +8,16 @@ NFC card reader, primarily designed for payment cards.
 - NFC reader (currently only Adafruit PN532 is supported)
 - PyQt5
 
+
 ### Usage
 
 Current workflow:
 
-1. Run the reader app (execute make in the rdr directory)
+1. Run make in the root folder
 2. Scan an NFC card while the reader is running
-3. Run the GUI
+3. The GUI will open displaying the data
+
+- Tested only working on Linux (it is possible to run on Windows if libnfc is working)
 
 ### Credits
 
