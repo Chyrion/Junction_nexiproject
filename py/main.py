@@ -92,7 +92,7 @@ def reader1(file):
         if len(expirations) == 0:
             expirations.append("No Expiration Date Found")
 
-        return card_numbers,card_holders,AIDS,keys,application_labels,priorities, tracks, expirations
+        return card_numbers,card_holders,AIDS,keys,application_labels,priorities, tracks, expirations, file
 
 
 
