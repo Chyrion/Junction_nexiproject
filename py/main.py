@@ -1,10 +1,12 @@
 import sys
+import os
 from gui import *
 import subprocess
 def executor(): #executes the C++ scripts. And python regex script. Gives data file to this python script to read and display
     proc = subprocess.Popen(["g++ ./rdr/rdr.cpp -std=c++17 -fpermissive -lnfc -o ./rdr/rdr | ./rdr/rdr"], stdout=subprocess.PIPE, shell=True)
     proc.wait()
-    proc = subprocess.Popen(["python3 ./py/parser.py"])
+    cwd = os.getcwd()
+    proc = subprocess.Popen([f"python3 {cwd}/py/parser.py"])
     proc.wait()
     pass
 
@@ -82,11 +84,11 @@ def reader1(file):
 
 def main():
     # Start the Qt event loop. (i.e. make it possible to interact with the gui)
-    executor()
+    #executor()
     global app  # Use global to prevent crashing on exit
     app = QApplication(sys.argv)
 
-    file="output.txt"
+    file="py/out.txt"
 
     final_list=reader1(file)
     print(final_list)

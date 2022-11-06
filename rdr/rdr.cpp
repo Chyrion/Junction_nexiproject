@@ -506,7 +506,7 @@ int main(int argc, char **argv) {
                 if(true) { // Looking for data by educated bruteforce
                     std::cout << "[-] Looking for data by educated bruteforce..." << std::endl;
                     for (uint8_t ef = 1; ef <= 31; ef++) {
-                        for (uint8_t rec = 0; rec <= 16; rec++) {
+                        for (uint8_t rec = 0; rec <= 2; rec++) {
                             try_reading_record(pnd, rec, (ef << 3) | 4);
                         }
                     }
