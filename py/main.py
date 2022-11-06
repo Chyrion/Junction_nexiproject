@@ -103,19 +103,6 @@ def reader1(file):
 
 
 
-# def reader(): #reads the data from a text file and separates values into separate variables, separated by commas
-#     data_dict= {} #for storing AID, key, cardholder name, track 1, track 2
-#     with open('output.txt', 'r') as f:
-#         data = f.read()
-#         data = data.split(',')
-#         data_dict[AID]=data[0]
-#         data_dict[key]=data[1]
-#         data_dict[card_holder]=data[2]
-#         data_dict[track1]=data[3]
-#         data_dict[track2]=data[4]
-#
-#     return data_dict
-
 
 def main():
     #print(reader1("output.txt"))
@@ -124,15 +111,17 @@ def main():
     global app  # Use global to prevent crashing on exit
     app = QApplication(sys.argv)
 
+    file="output.txt"
 
-
-    final_list=reader1("./py/out.txt")
+    final_list=reader1(file)
     #dict=reader()
     #gui = GUI(dict[AID],dict[key],dict[card_holder],dict[track1],dict[track2])
     #print(final_list)
     #gui = GUI(final_list[0],final_list[1],final_list[2],"track1","track2",final_list[3])
     print(final_list)
-    gui=GUI(final_list[0],final_list[1],final_list[2],final_list[3], final_list[4], final_list[5], final_list[6], final_list[7])
+    gui=GUI(final_list[0],final_list[1],final_list[2],final_list[3], final_list[4], final_list[5], final_list[6], final_list[7], open(file, "r"))
+    gui.show()
+    sys.exit(app.exec_())
 
 
     sys.exit(app.exec_())
