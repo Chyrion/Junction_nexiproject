@@ -127,7 +127,7 @@ class GUI(QtWidgets.QMainWindow):
         self.scene_top.addWidget(self.Cardholder_Name_label)
         self.scene_top.addWidget(self.track_label)
         self.scene_top.addWidget(self.track2)
-        self.scene_top.addWidget(self.TLV_data_d)
+        self.scene_top.addWidget(self.expiration_label)
         self.scene_top.addWidget(self.Cardnumber_label)
         self.scene_top.addWidget(self.application_label2)
         self.scene_top.addWidget(self.dump_label)
@@ -135,7 +135,7 @@ class GUI(QtWidgets.QMainWindow):
     def button(self):
         # executor=Executor()
 
-        self.button = QPushButton('HACK', self)
+        self.button = QPushButton('EXECUTE HACK', self)
         self.button.move(50, 50)
         # self.button.clicked.connect(lambda executor.execute() )
         self.layout.addWidget(self.button)
