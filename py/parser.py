@@ -34,7 +34,5 @@ with open('py/out.txt', 'w') as r:
   for x in c:
     r.write(f'{x}\n')
 
-print(c)
-
 r.close()
 #print(c)
