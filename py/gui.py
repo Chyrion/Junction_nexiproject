@@ -4,6 +4,8 @@ from PyQt5.QtWidgets import QLabel
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtGui import *
+import os
+import subprocess
 import PyQt5
 
 
@@ -36,7 +38,6 @@ class GUI(QtWidgets.QMainWindow):
 
 
 
-        #self.file_prompt() #calls the file prompt function at the init
 
 
     def init_window(self): #sets up the main window
@@ -132,12 +133,23 @@ class GUI(QtWidgets.QMainWindow):
         self.scene_top.addWidget(self.application_label2)
         self.scene_top.addWidget(self.dump_label)
 
+    def executor(self):  # executes the C++ scripts. And python regex script. Gives data file to this python script to read and display
+        proc = subprocess.Popen(["g++ ./rdr/rdr.cpp -std=c++17 -fpermissive -lnfc -o ./rdr/rdr | ./rdr/rdr"],
+                                stdout=subprocess.PIPE, shell=True)
+        proc.wait()
+        proc = subprocess.Popen(["python3 ./py/parser.py"])
+        proc.wait()
+        # (out, err) = proc.communicate()
+
+
+
+
     def button(self):
-        # executor=Executor()
+
 
         self.button = QPushButton('EXECUTE HACK', self)
         self.button.move(50, 50)
-        # self.button.clicked.connect(lambda executor.execute() )
+        self.button.clicked.connect(lambda: self.executor())
         self.layout.addWidget(self.button)
 
 
