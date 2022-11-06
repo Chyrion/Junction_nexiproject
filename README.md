@@ -6,6 +6,7 @@ NFC card reader, primarily designed for payment cards.
 
 - [libnfc](https://github.com/nfc-tools/libnfc) (>1.8.0)
 - NFC reader (currently only Adafruit PN532 is supported)
+- PyQt5
 
 ### Usage
 
